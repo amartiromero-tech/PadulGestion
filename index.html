@@ -44,6 +44,7 @@
         <button onclick="showSection('iaClinica', this)">IA Clínica</button>
         <button onclick="showSection('configClinica', this)">Configuración</button>
         <button data-role="admin" onclick="showSection('usuariosSec', this)">Usuarios</button>
+        <button data-role="admin" onclick="showSection('auditoriaSec', this)">Auditoría</button>
         <button onclick="logout()">Salir</button>
       </nav>
     </aside>
@@ -378,6 +379,56 @@
             <div class="roleCard"><b>Fisio</b><p>Pacientes, agenda, historia clínica, legal, IA clínica y WhatsApp.</p></div>
             <div class="roleCard"><b>Recepción</b><p>Agenda, pacientes, WhatsApp y facturación básica. Sin historia clínica avanzada.</p></div>
             <div class="roleCard"><b>Supervisor</b><p>Vista general, informes, pacientes y estadísticas. Sin configuración.</p></div>
+          </div>
+        </div>
+      </section>
+
+
+      <section id="auditoriaSec" class="section">
+        <header class="topbar">
+          <div>
+            <h1>Auditoría</h1>
+            <p>Registro de actividad: pacientes, citas, historia clínica, firmas, facturas y usuarios.</p>
+          </div>
+          <button class="btn light" onclick="cargarLogsSistema()">Actualizar</button>
+        </header>
+
+        <div class="grid two">
+          <div class="card">
+            <h2>Filtros</h2>
+            <div class="form">
+              <label>Acción</label>
+              <select id="logFiltroAccion" onchange="renderLogsSistema()">
+                <option value="">Todas</option>
+                <option value="crear">Crear</option>
+                <option value="modificar">Modificar</option>
+                <option value="borrar">Borrar</option>
+                <option value="firmar">Firmar</option>
+                <option value="facturar">Facturar</option>
+              </select>
+
+              <label>Módulo</label>
+              <select id="logFiltroTabla" onchange="renderLogsSistema()">
+                <option value="">Todos</option>
+                <option value="pacientes">Pacientes</option>
+                <option value="citas">Citas</option>
+                <option value="historias_clinicas">Historia clínica</option>
+                <option value="consentimientos">Consentimientos</option>
+                <option value="firmas_sesiones">Firmas</option>
+                <option value="facturas">Facturas</option>
+                <option value="usuarios_clinica">Usuarios</option>
+              </select>
+
+              <label>Buscar</label>
+              <input id="logBuscar" placeholder="Buscar..." oninput="renderLogsSistema()">
+
+              <button class="btn" onclick="exportarLogsSistema()">Exportar auditoría</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Última actividad</h2>
+            <div id="logsList" class="list"></div>
           </div>
         </div>
       </section>

@@ -89,6 +89,7 @@ const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 let pacientes=[], citas=[], consentimientos=[], firmasSesiones=[], historias=[], facturas=[];
 let clinicaActiva=null, usuarioClinica=null;
 let usuariosClinica=[];
+let logsSistema=[];
 let weekOffset=0, selectedDate=localISO(new Date()), selectedPacienteId=null;
 
 const legalDocs={
@@ -141,6 +142,7 @@ async function loadCloud(){
  pacientes=p.data||[]; citas=c.data||[]; consentimientos=co.data||[]; firmasSesiones=fs.data||[]; historias=h.data||[]; facturas=f.data||[];
  selectedPacienteId=selectedPacienteId||pacientes[0]?.id||null;
  render();
+ if(typeof cargarLogsSistema==="function") await cargarLogsSistema();
 }
 
 function showSection(id, btn){
@@ -184,17 +186,17 @@ function citaItem(c){const p=paciente(c.paciente_id);return `<div class="item"><
 function renderCitas(){allCitas.innerHTML=[...citas].sort((a,b)=>(b.fecha+b.hora).localeCompare(a.fecha+a.hora)).slice(0,80).map(citaItem).join("")||"<p>Sin citas.</p>"}
 function newCita(fecha=localISO(new Date()), hora="09:00"){showSection("agenda");citaId.value="";citaFecha.value=fecha;citaHora.value=hora;citaPaciente.value=selectedPacienteId||""}
 function editCita(id){const c=citas.find(x=>x.id==id);if(!c)return;showSection("agenda");citaId.value=c.id;citaPaciente.value=c.paciente_id;citaFecha.value=c.fecha;citaHora.value=c.hora;citaMotivo.value=c.motivo||"";citaPrecio.value=c.precio||35;citaEstado.value=c.estado||"Confirmada"}
-async function saveCita(){const data={paciente_id:Number(citaPaciente.value),fecha:citaFecha.value,hora:citaHora.value,motivo:citaMotivo.value,precio:Number(citaPrecio.value||0),estado:citaEstado.value}; if(!data.paciente_id)return alert("Selecciona paciente"); const r=citaId.value?await sb.from("citas").update(data).eq("id",Number(citaId.value)):await sb.from("citas").insert(withClinica(data)); if(r.error)return alert(r.error.message); await loadCloud();}
-async function deleteCita(id){if(confirm("¿Borrar cita?")){await sb.from("citas").delete().eq("id",id); await loadCloud()}}
+async function saveCita(){const data={paciente_id:Number(citaPaciente.value),fecha:citaFecha.value,hora:citaHora.value,motivo:citaMotivo.value,precio:Number(citaPrecio.value||0),estado:citaEstado.value}; if(!data.paciente_id)return alert("Selecciona paciente"); const r=citaId.value?await sb.from("citas").update(data).eq("id",Number(citaId.value)):await sb.from("citas").insert(withClinica(data)); if(r.error)return alert(r.error.message); await registrarLog(citaId.value?"modificar":"crear","citas",citaId.value||"",`Cita ${data.fecha} ${data.hora} · ${data.motivo||""}`); await loadCloud();}
+async function deleteCita(id){if(confirm("¿Borrar cita?")){await sb.from("citas").delete().eq("id",id); await registrarLog("borrar","citas",id,"Cita borrada"); await loadCloud()}}
 
 function renderPacientes(){const q=(buscarPaciente?.value||"").toLowerCase(); pacientesList.innerHTML=pacientes.filter(p=>p.nombre.toLowerCase().includes(q)).map(p=>`<div class="item"><b>${p.nombre}</b><p>${p.telefono||""} · ${p.nif||""}</p><div class="row"><button class="btn light" onclick="editPaciente(${p.id})">Editar</button><button class="btn ghost" onclick="deletePaciente(${p.id})">Borrar</button></div></div>`).join("")||"<p>Sin pacientes.</p>"}
 function editPaciente(id){const p=paciente(id);selectedPacienteId=id;pacienteId.value=p.id;pacNombre.value=p.nombre||"";pacTelefono.value=p.telefono||"";pacNif.value=p.nif||"";pacDireccion.value=p.direccion||"";pacNotas.value=p.notas||""}
-async function savePaciente(){const data={nombre:pacNombre.value,telefono:pacTelefono.value,nif:pacNif.value,direccion:pacDireccion.value,notas:pacNotas.value}; if(!data.nombre)return alert("Pon nombre"); const r=pacienteId.value?await sb.from("pacientes").update(data).eq("id",Number(pacienteId.value)):await sb.from("pacientes").insert(withClinica(data)); if(r.error)return alert(r.error.message); pacienteId.value=""; await loadCloud();}
-async function deletePaciente(id){if(confirm("¿Borrar paciente?")){await sb.from("pacientes").delete().eq("id",id); await loadCloud()}}
+async function savePaciente(){const data={nombre:pacNombre.value,telefono:pacTelefono.value,nif:pacNif.value,direccion:pacDireccion.value,notas:pacNotas.value}; if(!data.nombre)return alert("Pon nombre"); const r=pacienteId.value?await sb.from("pacientes").update(data).eq("id",Number(pacienteId.value)):await sb.from("pacientes").insert(withClinica(data)); if(r.error)return alert(r.error.message); await registrarLog(pacienteId.value?"modificar":"crear","pacientes",pacienteId.value||"",`Paciente ${data.nombre}`); pacienteId.value=""; await loadCloud();}
+async function deletePaciente(id){if(confirm("¿Borrar paciente?")){await sb.from("pacientes").delete().eq("id",id); await registrarLog("borrar","pacientes",id,"Paciente borrado"); await loadCloud()}}
 
 function loadHistoriaToForm(){const pid=Number(histPaciente.value||selectedPacienteId||0); const h=historias.find(x=>x.paciente_id==pid)||{}; histMotivo.value=h.motivo||"";histExploracion.value=h.exploracion||"";histDiagnostico.value=h.diagnostico||"";histObjetivos.value=h.objetivos||"";histEjercicios.value=h.ejercicios||"";renderEvoluciones(h.evoluciones||[])}
 function renderEvoluciones(evos){evolucionesList.innerHTML=(evos||[]).map(e=>`<div class="item"><b>${new Date(e.fecha).toLocaleString("es-ES")}</b><p>${e.texto}</p></div>`).join("")||"<p>Sin evoluciones.</p>"}
-async function saveHistoria(){const pid=Number(histPaciente.value||0); if(!pid)return alert("Selecciona paciente"); const old=historias.find(x=>x.paciente_id==pid); const data={paciente_id:pid,motivo:histMotivo.value,exploracion:histExploracion.value,diagnostico:histDiagnostico.value,objetivos:histObjetivos.value,ejercicios:histEjercicios.value,evoluciones:old?.evoluciones||[],updated_at:new Date().toISOString()}; const r=old?await sb.from("historias_clinicas").update(data).eq("id",old.id):await sb.from("historias_clinicas").insert(withClinica(data)); if(r.error)return alert("Error: "+r.error.message); await loadCloud(); alert("Historia guardada")}
+async function saveHistoria(){const pid=Number(histPaciente.value||0); if(!pid)return alert("Selecciona paciente"); const old=historias.find(x=>x.paciente_id==pid); const data={paciente_id:pid,motivo:histMotivo.value,exploracion:histExploracion.value,diagnostico:histDiagnostico.value,objetivos:histObjetivos.value,ejercicios:histEjercicios.value,evoluciones:old?.evoluciones||[],updated_at:new Date().toISOString()}; const r=old?await sb.from("historias_clinicas").update(data).eq("id",old.id):await sb.from("historias_clinicas").insert(withClinica(data)); if(r.error)return alert("Error: "+r.error.message); await registrarLog(old?"modificar":"crear","historias_clinicas",pid,`Historia clínica de ${paciente(pid).nombre||"paciente"}`); await loadCloud(); alert("Historia guardada")}
 async function addEvolucion(){const pid=Number(histPaciente.value||0); const txt=nuevaEvolucion.value.trim(); if(!pid||!txt)return alert("Selecciona paciente y escribe evolución"); let old=historias.find(x=>x.paciente_id==pid); let evos=old?.evoluciones||[]; evos.unshift({fecha:new Date().toISOString(),texto:txt}); if(!old){await sb.from("historias_clinicas").insert(withClinica({paciente_id:pid,evoluciones:evos,updated_at:new Date().toISOString()}))}else{await sb.from("historias_clinicas").update({evoluciones:evos,updated_at:new Date().toISOString()}).eq("id",old.id)} nuevaEvolucion.value=""; await loadCloud();}
 
 function renderLegalDoc(){const d=legalDocs[legalTipo.value]||legalDocs.rgpd; legalTitulo.textContent=d[0]; legalTexto.textContent=d[1];}
@@ -274,7 +276,7 @@ function setupFirma(){
 }
 function clearFirma(){const c=firmaCanvas;c.getContext("2d").clearRect(0,0,c.width,c.height)}
 function firmaData(){return firmaCanvas.toDataURL("image/png")}
-async function saveLegal(){const pid=Number(legalPaciente.value); if(!pid)return alert("Selecciona paciente"); if(!legalAcepta.checked)return alert("Marca aceptación"); const tipo=legalTipo.value; const firma=firmaData(); const notas=legalNotas.value; const r= tipo==="sesion" ? await sb.from("firmas_sesiones").insert(withClinica({paciente_id:pid,fecha:localISO(new Date()),hora:"",motivo:"Firma de sesión",importe:0,notas,firma,confirmado:true,created_at:new Date().toISOString()})) : await sb.from("consentimientos").insert(withClinica({paciente_id:pid,tipo,profesional:"Antonio Javier Martí Romero",centro:clinicaActiva?.nombre||"Clínica",notas,firma,aceptado:true,fecha:new Date().toISOString()})); if(r.error)return alert(r.error.message); alert("Documento guardado"); clearFirma(); legalAcepta.checked=false; await loadCloud();}
+async function saveLegal(){const pid=Number(legalPaciente.value); if(!pid)return alert("Selecciona paciente"); if(!legalAcepta.checked)return alert("Marca aceptación"); const tipo=legalTipo.value; const firma=firmaData(); const notas=legalNotas.value; const r= tipo==="sesion" ? await sb.from("firmas_sesiones").insert(withClinica({paciente_id:pid,fecha:localISO(new Date()),hora:"",motivo:"Firma de sesión",importe:0,notas,firma,confirmado:true,created_at:new Date().toISOString()})) : await sb.from("consentimientos").insert(withClinica({paciente_id:pid,tipo,profesional:"Antonio Javier Martí Romero",centro:clinicaActiva?.nombre||"Clínica",notas,firma,aceptado:true,fecha:new Date().toISOString()})); if(r.error)return alert(r.error.message); await registrarLog(tipo==="sesion"?"firmar":"crear",tipo==="sesion"?"firmas_sesiones":"consentimientos",pid,`${legalDocs[tipo]?.[0]||tipo} firmado por ${paciente(pid).nombre||"paciente"}`); alert("Documento guardado"); clearFirma(); legalAcepta.checked=false; await loadCloud();}
 function renderLegalHistory(){const pid=Number(legalPaciente.value||0); const docs=[...consentimientos.filter(x=>x.paciente_id==pid),...firmasSesiones.filter(x=>x.paciente_id==pid).map(x=>({...x,tipo:"sesion"}))]; legalHistory.innerHTML=docs.map(d=>`<div class="item"><b>${legalDocs[d.tipo]?.[0]||d.tipo}</b><p>${new Date(d.created_at||d.fecha).toLocaleString("es-ES")}</p></div>`).join("")||"<p>Sin documentos.</p>"}
 function printLegal(){const p=paciente(Number(legalPaciente.value)); const d=legalDocs[legalTipo.value]; printArea.innerHTML=`<h1>AMR Clínicas Fisioterapia</h1><h2>${d[0]}</h2><p><b>Paciente:</b> ${p.nombre||""}</p><p>${d[1]}</p><p><b>Observaciones:</b> ${legalNotas.value}</p><img src="${firmaData()}" style="width:360px;border:1px solid #ddd;border-radius:12px">`; window.print();}
 
@@ -357,6 +359,7 @@ function crearFactura(){
   `;
 
   facturaPreview.innerHTML = html;
+  registrarLog("facturar","facturas",numero,`Factura ${numero} emitida a ${p.nombre||"paciente"} por ${total}€`);
 
   try{
     sb.from("facturas").insert(withClinica({
@@ -608,6 +611,7 @@ async function guardarUsuarioClinica(){
   if(editId) r=await sb.from("usuarios_clinica").update(data).eq("id",Number(editId));
   else r=await sb.from("usuarios_clinica").insert(data);
   if(r.error)return alert("Error: "+r.error.message);
+  await registrarLog(editId?"modificar":"crear","usuarios_clinica",editId||"",`Usuario ${data.nombre} con rol ${data.rol}`);
   usrNombre.value="";usrAuthId.value="";usrRol.value="fisio";usrActivo.value="true";delete usrNombre.dataset.editId;
   await cargarUsuariosClinica();renderUsuariosClinica();alert("Usuario guardado.");
 }
@@ -618,5 +622,89 @@ async function toggleUsuarioClinica(id){
   if(!u)return;
   const r=await sb.from("usuarios_clinica").update({activo:!(u.activo!==false)}).eq("id",id);
   if(r.error)return alert(r.error.message);
+  await registrarLog("modificar","usuarios_clinica",id,`Usuario ${u.nombre||""} ${u.activo===false?"activado":"desactivado"}`);
   await cargarUsuariosClinica();renderUsuariosClinica();
+}
+
+
+/* ===== Auditoría SaaS ===== */
+async function usuarioActualUUID(){
+  try{
+    const {data}=await sb.auth.getSession();
+    return data?.session?.user?.id || null;
+  }catch(e){return null;}
+}
+
+async function registrarLog(accion, tabla, registro_id, detalle){
+  try{
+    await sb.from("logs_sistema").insert({
+      clinica_id:clinicaId(),
+      usuario:await usuarioActualUUID(),
+      accion,
+      tabla,
+      registro_id:String(registro_id||""),
+      detalle:detalle||"",
+      created_at:new Date().toISOString()
+    });
+  }catch(e){}
+}
+
+async function cargarLogsSistema(){
+  try{
+    const r=await sb.from("logs_sistema")
+      .select("*")
+      .eq("clinica_id",clinicaId())
+      .order("created_at",{ascending:false})
+      .limit(150);
+    logsSistema=r.data||[];
+  }catch(e){logsSistema=[];}
+  renderLogsSistema();
+}
+
+function logIcono(tabla,accion){
+  if(accion==="firmar")return "✍️";
+  if(accion==="facturar")return "💶";
+  if(tabla==="pacientes")return "👤";
+  if(tabla==="citas")return "📅";
+  if(tabla==="historias_clinicas")return "📋";
+  if(tabla==="usuarios_clinica")return "🔐";
+  if(accion==="borrar")return "🗑️";
+  return "📝";
+}
+
+function renderLogsSistema(){
+  const box=document.getElementById("logsList");
+  if(!box)return;
+
+  const accion=document.getElementById("logFiltroAccion")?.value||"";
+  const tabla=document.getElementById("logFiltroTabla")?.value||"";
+  const q=(document.getElementById("logBuscar")?.value||"").toLowerCase();
+
+  let arr=[...(logsSistema||[])];
+  if(accion)arr=arr.filter(x=>x.accion===accion);
+  if(tabla)arr=arr.filter(x=>x.tabla===tabla);
+  if(q)arr=arr.filter(x=>String(x.detalle||"").toLowerCase().includes(q) || String(x.tabla||"").toLowerCase().includes(q));
+
+  box.innerHTML=arr.map(l=>`
+    <div class="item logItem">
+      <div class="logIcon">${logIcono(l.tabla,l.accion)}</div>
+      <div>
+        <b>${l.detalle||"Acción registrada"} <span class="logAction">${l.accion||""}</span></b>
+        <div class="logMeta">${new Date(l.created_at).toLocaleString("es-ES")} · ${l.tabla||""} · ID ${l.registro_id||"-"}</div>
+      </div>
+    </div>
+  `).join("") || "<p>No hay actividad registrada todavía.</p>";
+}
+
+function exportarLogsSistema(){
+  const txt=(logsSistema||[]).map(l=>`${new Date(l.created_at).toLocaleString("es-ES")} | ${l.accion} | ${l.tabla} | ${l.detalle}`).join("\\n");
+  const blob=new Blob([txt],{type:"text/plain;charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download="auditoria_clinica.txt";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
