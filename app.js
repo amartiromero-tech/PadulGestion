@@ -636,29 +636,27 @@ async function usuarioActualUUID(){
 }
 
 async function registrarLog(accion, tabla, registro_id, detalle){
-  try{
-    await sb.from("logs_sistema").insert({
-      clinica_id:clinicaId(),
-      usuario:await usuarioActualUUID(),
-      accion,
-      tabla,
-      registro_id:String(registro_id||""),
-      detalle:detalle||"",
-      created_at:new Date().toISOString()
-    });
-  }catch(e){}
+  // La auditoría se registra en Supabase mediante triggers de PostgreSQL.
+  // Se conserva esta función para compatibilidad con llamadas antiguas.
+  return true;
 }
 
 async function cargarLogsSistema(){
+  const box=document.getElementById("logsList");
   try{
+    const id=clinicaId();
     const r=await sb.from("logs_sistema")
       .select("*")
-      .eq("clinica_id",clinicaId())
+      .eq("clinica_id",id)
       .order("created_at",{ascending:false})
       .limit(150);
+    if(r.error) throw r.error;
     logsSistema=r.data||[];
-  }catch(e){logsSistema=[];}
-  renderLogsSistema();
+    renderLogsSistema();
+  }catch(e){
+    logsSistema=[];
+    if(box) box.innerHTML=`<p><b>No se pudo cargar la auditoría.</b><br>${e?.message||e}</p>`;
+  }
 }
 
 function logIcono(tabla,accion){
@@ -697,14 +695,35 @@ function renderLogsSistema(){
 }
 
 function exportarLogsSistema(){
-  const txt=(logsSistema||[]).map(l=>`${new Date(l.created_at).toLocaleString("es-ES")} | ${l.accion} | ${l.tabla} | ${l.detalle}`).join("\\n");
+  const accion=document.getElementById("logFiltroAccion")?.value||"";
+  const tabla=document.getElementById("logFiltroTabla")?.value||"";
+  const q=(document.getElementById("logBuscar")?.value||"").toLowerCase();
+
+  let arr=[...(logsSistema||[])];
+  if(accion)arr=arr.filter(x=>x.accion===accion);
+  if(tabla)arr=arr.filter(x=>x.tabla===tabla);
+  if(q)arr=arr.filter(x=>String(x.detalle||"").toLowerCase().includes(q) || String(x.tabla||"").toLowerCase().includes(q));
+
+  if(!arr.length){
+    alert("No hay registros de auditoría para exportar.");
+    return;
+  }
+
+  const cabecera="Fecha y hora | Acción | Módulo | Registro | Detalle\n";
+  const txt=cabecera+arr.map(l =>
+    `${new Date(l.created_at).toLocaleString("es-ES")} | ${l.accion||""} | ${l.tabla||""} | ${l.registro_id||""} | ${l.detalle||""}`
+  ).join("\n");
+
   const blob=new Blob([txt],{type:"text/plain;charset=utf-8"});
   const url=URL.createObjectURL(blob);
   const a=document.createElement("a");
   a.href=url;
-  a.download="auditoria_clinica.txt";
+  a.download=`auditoria_clinica_${new Date().toISOString().slice(0,10)}.txt`;
+  a.style.display="none";
   document.body.appendChild(a);
   a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  setTimeout(()=>{
+    a.remove();
+    URL.revokeObjectURL(url);
+  },1000);
 }
