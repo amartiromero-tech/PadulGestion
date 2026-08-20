@@ -190,8 +190,44 @@ async function saveCita(){const data={paciente_id:Number(citaPaciente.value),fec
 async function deleteCita(id){if(confirm("¿Borrar cita?")){await sb.from("citas").delete().eq("id",id); await registrarLog("borrar","citas",id,"Cita borrada"); await loadCloud()}}
 
 function renderPacientes(){const q=(buscarPaciente?.value||"").toLowerCase(); pacientesList.innerHTML=pacientes.filter(p=>p.nombre.toLowerCase().includes(q)).map(p=>`<div class="item"><b>${p.nombre}</b><p>${p.telefono||""} · ${p.nif||""}</p><div class="row"><button class="btn light" onclick="editPaciente(${p.id})">Editar</button><button class="btn ghost" onclick="deletePaciente(${p.id})">Borrar</button></div></div>`).join("")||"<p>Sin pacientes.</p>"}
-function editPaciente(id){const p=paciente(id);selectedPacienteId=id;pacienteId.value=p.id;pacNombre.value=p.nombre||"";pacTelefono.value=p.telefono||"";pacNif.value=p.nif||"";pacDireccion.value=p.direccion||"";pacNotas.value=p.notas||""}
-async function savePaciente(){const data={nombre:pacNombre.value,telefono:pacTelefono.value,nif:pacNif.value,direccion:pacDireccion.value,notas:pacNotas.value}; if(!data.nombre)return alert("Pon nombre"); const r=pacienteId.value?await sb.from("pacientes").update(data).eq("id",Number(pacienteId.value)):await sb.from("pacientes").insert(withClinica(data)); if(r.error)return alert(r.error.message); await registrarLog(pacienteId.value?"modificar":"crear","pacientes",pacienteId.value||"",`Paciente ${data.nombre}`); pacienteId.value=""; await loadCloud();}
+function editPaciente(id){const p=paciente(id);selectedPacienteId=id;pacienteId.value=p.id;pacNombre.value=p.nombre||"";pacTelefono.value=p.telefono||"";pacNif.value=p.nif||"";pacDireccion.value=p.direccion||"
+async function savePaciente(){
+  const data={
+    nombre:pacNombre.value,
+    telefono:pacTelefono.value,
+    nif:pacNif.value,
+    direccion:pacDireccion.value,
+    notas:pacNotas.value
+  };
+
+  if(!data.nombre) return alert("Escribe el nombre del paciente");
+
+  let r;
+
+  if(selectedPacienteId){
+    r=await sb
+      .from("pacientes")
+      .update(data)
+      .eq("id",Number(selectedPacienteId));
+  }else{
+    r=await sb
+      .from("pacientes")
+      .insert(withClinica(data));
+  }
+
+  if(r.error) return alert("Error guardando paciente: "+r.error.message);
+
+  selectedPacienteId=null;
+  pacienteId.value="";
+  pacNombre.value="";
+  pacTelefono.value="";
+  pacNif.value="";
+  pacDireccion.value="";
+  pacNotas.value="";
+
+  await loadCloud();
+  alert("Paciente guardado");
+}
 async function deletePaciente(id){if(confirm("¿Borrar paciente?")){await sb.from("pacientes").delete().eq("id",id); await registrarLog("borrar","pacientes",id,"Paciente borrado"); await loadCloud()}}
 
 function loadHistoriaToForm(){const pid=Number(histPaciente.value||selectedPacienteId||0); const h=historias.find(x=>x.paciente_id==pid)||{}; histMotivo.value=h.motivo||"";histExploracion.value=h.exploracion||"";histDiagnostico.value=h.diagnostico||"";histObjetivos.value=h.objetivos||"";histEjercicios.value=h.ejercicios||"";renderEvoluciones(h.evoluciones||[])}
