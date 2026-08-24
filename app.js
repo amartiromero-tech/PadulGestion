@@ -190,7 +190,16 @@ async function saveCita(){const data={paciente_id:Number(citaPaciente.value),fec
 async function deleteCita(id){if(confirm("¿Borrar cita?")){await sb.from("citas").delete().eq("id",id); await registrarLog("borrar","citas",id,"Cita borrada"); await loadCloud()}}
 
 function renderPacientes(){const q=(buscarPaciente?.value||"").toLowerCase(); pacientesList.innerHTML=pacientes.filter(p=>p.nombre.toLowerCase().includes(q)).map(p=>`<div class="item"><b>${p.nombre}</b><p>${p.telefono||""} · ${p.nif||""}</p><div class="row"><button class="btn light" onclick="editPaciente(${p.id})">Editar</button><button class="btn ghost" onclick="deletePaciente(${p.id})">Borrar</button></div></div>`).join("")||"<p>Sin pacientes.</p>"}
-function editPaciente(id){const p=paciente(id);selectedPacienteId=id;pacienteId.value=p.id;pacNombre.value=p.nombre||"";pacTelefono.value=p.telefono||"";pacNif.value=p.nif||"";pacDireccion.value=p.direccion||"
+function editPaciente(id){
+  const p=paciente(id);
+  selectedPacienteId=id;
+  pacienteId.value=p.id;
+  pacNombre.value=p.nombre||"";
+  pacTelefono.value=p.telefono||"";
+  pacNif.value=p.nif||"";
+  pacDireccion.value=p.direccion||"";
+  pacNotas.value=p.notas||"";
+}
 async function savePaciente(){
   const data={
     nombre:pacNombre.value,
