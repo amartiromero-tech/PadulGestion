@@ -1,4 +1,5 @@
-const CACHE_NAME = 'amr-pro-v4';
+const CACHE_PREFIX = 'amr-pro-';
+const CACHE_NAME = `${CACHE_PREFIX}v5`;
 const ASSETS = [
   './',
   './index.html',
@@ -6,6 +7,9 @@ const ASSETS = [
   './app.js',
   './manifest.json'
 ];
+const ASSET_URLS = new Set(
+  ASSETS.map(path => new URL(path, self.registration.scope).href)
+);
 
 self.addEventListener('install', event => {
   self.skipWaiting();
@@ -20,7 +24,7 @@ self.addEventListener('activate', event => {
       .then(keys =>
         Promise.all(
           keys
-            .filter(key => key !== CACHE_NAME)
+            .filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
             .map(key => caches.delete(key))
         )
       )
@@ -29,15 +33,24 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
+  // Only application assets belong in this cache; API traffic goes directly to the network.
+  if(event.request.method !== 'GET' || !ASSET_URLS.has(event.request.url)) return;
+
+  const responsePromise = fetch(event.request);
+  event.waitUntil(
+    responsePromise.then(async response => {
+      if(!response.ok) return;
+      const copy = response.clone();
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(event.request, copy);
+    }).catch(() => {})
+  );
   event.respondWith(
-    fetch(event.request)
-      .then(response => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then(cache => {
-          cache.put(event.request, copy);
-        });
-        return response;
-      })
-      .catch(() => caches.match(event.request))
+    responsePromise.catch(async error => {
+      const cache = await caches.open(CACHE_NAME);
+      const cached = await cache.match(event.request);
+      if(cached) return cached;
+      throw error;
+    })
   );
 });
