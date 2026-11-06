@@ -56,7 +56,7 @@
             <h1>Hola, Antonio 👋</h1>
             <p>Panel principal de AMR Clínicas Fisioterapia</p>
           </div>
-          <button class="btn" onclick="showSection('agenda')">+ Nueva cita</button>
+          <button class="btn" onclick="newCita()">+ Nueva cita</button>
         </header>
 
         <div class="kpis">
@@ -91,6 +91,7 @@
         <div class="grid two">
           <div class="card">
             <h2>Nueva / editar cita</h2>
+            <button class="btn light" onclick="newCita()">+ Nueva cita</button>
             <div class="form">
               <input type="hidden" id="citaId">
               <label>Paciente</label><select id="citaPaciente"></select>
