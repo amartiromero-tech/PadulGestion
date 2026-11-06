@@ -23,7 +23,7 @@ vm.createContext(context);
 vm.runInContext(source,context);
 vm.runInContext(`
   pacientes=[{id:7,nombre:'Original',telefono:'600000000'}];
-  clinicaActiva={id:3};
+  clinicaActiva={id:3}; usuarioClinica={activo:true,rol:'admin',clinica_id:3};
   selectedPacienteId=7;
   loadCloud=async function(){selectedPacienteId=7;};
 `,context);

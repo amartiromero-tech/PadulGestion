@@ -1,51 +1,43 @@
-
-async function asegurarClinicaActiva(){
-  try{
-    const {data:sessionData}=await sb.auth.getSession();
-    const user=sessionData?.session?.user || null;
-
-    if(user){
-      const rel=await sb.from("usuarios_clinica").select("*, clinicas(*)").eq("auth_user_id",user.id).maybeSingle();
-      if(rel.data && rel.data.clinicas){
-        usuarioClinica=rel.data;
-        clinicaActiva=rel.data.clinicas;
-        localStorage.setItem("clinica_id", String(clinicaActiva.id));
-        aplicarBrandingClinica();
-        return clinicaActiva;
-      }
-    }
-
-    const saved=localStorage.getItem("clinica_id");
-    if(saved){
-      const c=await sb.from("clinicas").select("*").eq("id",Number(saved)).maybeSingle();
-      if(c.data){
-        clinicaActiva=c.data;
-        aplicarBrandingClinica();
-        return clinicaActiva;
-      }
-    }
-
-    const first=await sb.from("clinicas").select("*").order("id",{ascending:true}).limit(1).maybeSingle();
-    if(first.data){
-      clinicaActiva=first.data;
-      localStorage.setItem("clinica_id", String(clinicaActiva.id));
-      aplicarBrandingClinica();
-      return clinicaActiva;
-    }
-
-    const nueva={nombre:"AMR Clínicas de Fisioterapia",telefono:"698344334",email:"amrclinicasfisio@hotmail.com",direccion:"Granada",cif:"74671815S",color_principal:"#14b8a6",logo:window.AMR_LOGO||""};
-    const ins=await sb.from("clinicas").insert(nueva).select().single();
-    clinicaActiva=ins.data||nueva;
-    if(clinicaActiva.id)localStorage.setItem("clinica_id", String(clinicaActiva.id));
-    aplicarBrandingClinica();
-    return clinicaActiva;
-  }catch(e){
-    clinicaActiva={id:Number(localStorage.getItem("clinica_id")||1),nombre:"AMR Clínicas de Fisioterapia",telefono:"698344334",email:"amrclinicasfisio@hotmail.com",direccion:"Granada",cif:"74671815S",color_principal:"#14b8a6",logo:window.AMR_LOGO||""};
-    aplicarBrandingClinica();
-    return clinicaActiva;
-  }
+let accessEpoch=0;
+const rolesPermitidos=["admin","fisio","recepcion","supervisor"];
+function limpiarAcceso(){
+ accessEpoch++;
+ pacientes=[];citas=[];consentimientos=[];firmasSesiones=[];historias=[];facturas=[];usuariosClinica=[];logsSistema=[];
+ usuarioClinica=null;clinicaActiva=null;selectedPacienteId=null;citaEditId=null;
+ localStorage.removeItem("amr_bypass");localStorage.removeItem("clinica_id");
+ document.querySelectorAll(".section input,.section textarea,.section select").forEach(el=>{el.value=""});
+ document.querySelectorAll(".section .list,#weeklyCalendar,#facturaPreview,#printArea,#iaResultado,#waTexto").forEach(el=>{el.textContent=""});
+ document.querySelectorAll(".section").forEach(el=>el.classList.remove("active"));
+ document.querySelectorAll("[id^='kpi']").forEach(el=>{el.textContent="—"});
+ const canvas=document.getElementById("firmaCanvas");
+ if(canvas)canvas.getContext("2d").clearRect(0,0,canvas.width,canvas.height);
+ const overlay=document.getElementById("loginOverlay");if(overlay)overlay.style.display="flex";
 }
-function clinicaId(){return Number(clinicaActiva?.id || localStorage.getItem("clinica_id") || 1)}
+async function asegurarClinicaActiva(){
+ const epoch=accessEpoch;
+ const {data,error}=await sb.auth.getUser();
+ if(error)throw error;
+ const user=data?.user;
+ if(!user || user.is_anonymous)throw new Error("Inicia sesión con tu cuenta de la clínica.");
+ const rel=await sb.from("usuarios_clinica").select("*, clinicas(*)").eq("auth_user_id",user.id).eq("activo",true).order("id");
+ if(rel.error)throw rel.error;
+ if(epoch!==accessEpoch)throw new Error("La sesión ha cambiado.");
+ const validas=(rel.data||[]).filter(m=>m.activo===true && m.auth_user_id===user.id && m.clinicas?.id===m.clinica_id && rolesPermitidos.includes(m.rol));
+ if(!validas.length)throw new Error("Tu cuenta no tiene una clínica activa asignada. Contacta con el administrador.");
+ const saved=localStorage.getItem("clinica_id");
+ const candidatas=validas.filter(m=>String(m.clinica_id)===saved);
+ const miembros=candidatas.length?candidatas:validas.filter(m=>m.clinica_id===validas[0].clinica_id);
+ if(new Set(miembros.map(m=>m.rol)).size!==1)throw new Error("Hay roles contradictorios para tu cuenta. Contacta con el administrador.");
+ // Identical historical duplicates are tolerated; conflicting roles never grant admin.
+ if(usuarioClinica && (usuarioClinica.auth_user_id!==user.id || usuarioClinica.rol!==miembros[0].rol || clinicaActiva?.id!==miembros[0].clinica_id))limpiarAcceso();
+ usuarioClinica=miembros[0];clinicaActiva=usuarioClinica.clinicas;
+ localStorage.setItem("clinica_id",String(clinicaActiva.id));
+ aplicarBrandingClinica();return clinicaActiva;
+}
+function clinicaId(){
+ if(!clinicaActiva?.id || !usuarioClinica?.activo || !rolesPermitidos.includes(usuarioClinica.rol))throw new Error("No hay acceso autorizado a una clínica.");
+ return clinicaActiva.id;
+}
 function withClinica(data){return {...data, clinica_id:clinicaId()}}
 function aplicarBrandingClinica(){
   if(!clinicaActiva)return;
@@ -67,9 +59,10 @@ function rellenarConfigClinica(){
   cfgLogoPreview.src=clinicaActiva.logo||window.AMR_LOGO||"";
   cfgNombrePreview.textContent=clinicaActiva.nombre||"Clínica";
   cfgDatosPreview.textContent=`${clinicaActiva.direccion||""}\n${clinicaActiva.telefono||""} · ${clinicaActiva.email||""}\nCIF/NIF: ${clinicaActiva.cif||""}`;
-  cfgClinicaIdText.textContent=`ID clínica: ${clinicaActiva.id||"local"} · Rol: ${usuarioClinica?.rol||"admin/local"}`;
+  cfgClinicaIdText.textContent=`ID clínica: ${clinicaActiva.id||"local"} · Rol: ${rolActual()||"Sin acceso"}`;
 }
 async function guardarClinicaConfig(){
+  if(!esAdmin())return alert("Solo el administrador puede cambiar la configuración.");
   const data={nombre:cfgNombre.value,telefono:cfgTelefono.value,email:cfgEmail.value,cif:cfgCif.value,direccion:cfgDireccion.value,color_principal:cfgColor.value,logo:cfgLogo.value||window.AMR_LOGO||""};
   let r;
   if(clinicaActiva?.id)r=await sb.from("clinicas").update(data).eq("id",clinicaActiva.id).select().single();
@@ -82,8 +75,9 @@ async function guardarClinicaConfig(){
 }
 
 
-const SUPABASE_URL="https://gjwxsaczasfprwochzyw.supabase.co";
-const SUPABASE_KEY="sb_publishable_zH89akxkPVSGUg6BSjtjjg_vl06k6oB";
+// Security preview uses the isolated staging project. Do not deploy this configuration to production.
+const SUPABASE_URL="https://mzbivhwuznrbvxurbuys.supabase.co";
+const SUPABASE_KEY="sb_publishable_w2GSo-epwnQLfjQMw5V24w_qUpbyMBU";
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 
 let pacientes=[], citas=[], consentimientos=[], firmasSesiones=[], historias=[], facturas=[];
@@ -108,45 +102,58 @@ function paciente(id){return pacientes.find(p=>p.id==id)||{}}
 function eur(n){return `${Number(n||0).toFixed(0)}€`}
 
 async function init(){
+ if(sb.auth.onAuthStateChange)sb.auth.onAuthStateChange((event,session)=>{
+   if(event==="SIGNED_OUT" || event==="USER_DELETED" || (event==="SIGNED_IN" && usuarioClinica && session?.user?.id!==usuarioClinica.auth_user_id))limpiarAcceso();
+ });
  await checkLogin();
- await loadCloud();
- setTimeout(setupFirma,500);
- renderLegalDoc();
+ setTimeout(setupFirma,500);renderLegalDoc();
 }
 document.addEventListener("DOMContentLoaded",init);
-
 async function checkLogin(){
- const bypass=localStorage.getItem("amr_bypass")==="1";
+ try{await loadCloud();document.getElementById("loginOverlay").style.display="none";return true;}
+ catch(e){limpiarAcceso();loginMsg.textContent=e.message;return false;}
+}
+async function login(){
+ loginMsg.textContent="";
  try{
-   const {data}=await sb.auth.getSession();
-   document.getElementById("loginOverlay").style.display=(data.session||bypass)?"none":"flex";
- }catch(e){document.getElementById("loginOverlay").style.display=bypass?"none":"flex";}
+   const {error}=await sb.auth.signInWithPassword({email:loginEmail.value.trim(),password:loginPassword.value});
+   if(error)throw error;
+   await checkLogin();
+ }catch(e){limpiarAcceso();loginMsg.textContent=e.message;}
 }
-async function login(){loginMsg.textContent="";const {error}=await sb.auth.signInWithPassword({email:loginEmail.value.trim(),password:loginPassword.value});if(error){loginMsg.textContent=error.message;return} await checkLogin(); await loadCloud();}
-async function signup(){loginMsg.textContent="";const {error}=await sb.auth.signUp({email:loginEmail.value.trim(),password:loginPassword.value});loginMsg.textContent=error?error.message:"Usuario creado. Revisa tu correo si pide confirmación."}
-function bypassLogin(){localStorage.setItem("amr_bypass","1");checkLogin()}
-async function logout(){localStorage.removeItem("amr_bypass");try{await sb.auth.signOut()}catch(e){} checkLogin()}
-
+async function logout(){
+ limpiarAcceso();
+ try{const {error}=await sb.auth.signOut();if(error)throw error;}
+ catch(e){loginMsg.textContent="No se pudo cerrar la sesión en el servidor. Vuelve a intentarlo: "+e.message;}
+}
 async function loadCloud(){
- await asegurarClinicaActiva();
- await cargarUsuariosClinica();
- const id=clinicaId();
- const [p,c,co,fs,h,f]=await Promise.all([
-   sb.from("pacientes").select("*").or(`clinica_id.eq.${id},clinica_id.is.null`).order("id"),
-   sb.from("citas").select("*").or(`clinica_id.eq.${id},clinica_id.is.null`).order("fecha"),
-   sb.from("consentimientos").select("*").or(`clinica_id.eq.${id},clinica_id.is.null`).order("created_at",{ascending:false}),
-   sb.from("firmas_sesiones").select("*").or(`clinica_id.eq.${id},clinica_id.is.null`).order("created_at",{ascending:false}),
-   sb.from("historias_clinicas").select("*").or(`clinica_id.eq.${id},clinica_id.is.null`).order("updated_at",{ascending:false}),
-   sb.from("facturas").select("*").or(`clinica_id.eq.${id},clinica_id.is.null`).order("id",{ascending:false})
+ try{await asegurarClinicaActiva();}catch(e){limpiarAcceso();throw e;}
+ const epoch=accessEpoch, id=clinicaId(), rol=rolActual();
+ const empty=()=>Promise.resolve({data:[],error:null});
+ const scoped=table=>sb.from(table).select("*").eq("clinica_id",id);
+ const clinical=["admin","fisio","supervisor"].includes(rol);
+ const [p,c,co,fs,h,f,u,l]=await Promise.all([
+   rol==="recepcion"?sb.rpc("amr_recepcion_pacientes",{p_clinica_id:id,p_accion:"listar"}):scoped("pacientes").order("id"),
+   rol==="recepcion"?sb.rpc("amr_recepcion_citas",{p_clinica_id:id,p_accion:"listar"}):scoped("citas").order("fecha"),
+   clinical?scoped("consentimientos").order("created_at",{ascending:false}):empty(),
+   clinical?scoped("firmas_sesiones").order("created_at",{ascending:false}):empty(),
+   clinical?scoped("historias_clinicas").order("updated_at",{ascending:false}):empty(),
+   ["admin","recepcion","supervisor"].includes(rol)?scoped("facturas").order("id",{ascending:false}):empty(),
+   rol==="admin"?scoped("usuarios_clinica").order("id"):empty(),
+   ["admin","supervisor"].includes(rol)?scoped("logs_sistema").order("created_at",{ascending:false}).limit(150):empty()
  ]);
- if(c.error)throw new Error("Error cargando citas: "+c.error.message);
- pacientes=p.data||[]; citas=c.data||[]; consentimientos=co.data||[]; firmasSesiones=fs.data||[]; historias=h.data||[]; facturas=f.data||[];
- selectedPacienteId=selectedPacienteId||pacientes[0]?.id||null;
- render();
- if(typeof cargarLogsSistema==="function") await cargarLogsSistema();
+ if(epoch!==accessEpoch)throw new Error("La sesión ha cambiado.");
+ for(const [label,result] of [["pacientes",p],["citas",c],["consentimientos",co],["firmas",fs],["historias",h],["facturas",f],["usuarios",u],["actividad",l]]){
+   if(result.error){limpiarAcceso();throw new Error("Error cargando "+label+": "+result.error.message);}
+ }
+ pacientes=p.data||[];citas=c.data||[];consentimientos=co.data||[];firmasSesiones=fs.data||[];historias=h.data||[];facturas=f.data||[];
+ usuariosClinica=u.data||[];logsSistema=l.data||[];
+ selectedPacienteId=pacientes.some(p=>p.id==selectedPacienteId)?selectedPacienteId:(pacientes[0]?.id||null);
+ render();aplicarPermisosVisuales();renderUsuariosClinica();renderLogsSistema();
+ if(!document.querySelector(".section.active"))document.getElementById("dashboard")?.classList.add("active");
 }
-
 function showSection(id, btn){
+ if(!puedeVerSeccion(id))return;
  document.querySelectorAll(".section").forEach(s=>s.classList.remove("active"));
  document.getElementById(id)?.classList.add("active");
  if(btn){document.querySelectorAll("nav button").forEach(b=>b.classList.remove("active"));btn.classList.add("active")}
@@ -208,6 +215,7 @@ function editCita(id){
 }
 async function saveCita(){
  if(guardandoCita)return;
+ if(!["admin","fisio","recepcion"].includes(rolActual()))return alert("Tu perfil no permite guardar citas.");
  const id=citaEditId;
  const data={paciente_id:Number(citaPaciente.value),fecha:citaFecha.value,hora:citaHora.value,motivo:citaMotivo.value,precio:Number(citaPrecio.value||0),estado:citaEstado.value};
  if(!data.paciente_id)return alert("Selecciona paciente");
@@ -215,8 +223,14 @@ async function saveCita(){
  guardandoCita=true;
  let saved;
  try{
-   const query=id?sb.from("citas").update(data).eq("id",Number(id)):sb.from("citas").insert(withClinica(data));
-   const r=await query.select("id").single();
+   let r;
+   if(esRecepcion()){
+     const {motivo,...allowed}=data;
+     r=await sb.rpc("amr_recepcion_citas",{p_clinica_id:clinicaId(),p_accion:id?"modificar":"crear",p_datos:{...allowed,...(id?{id:Number(id)}:{})}});
+   }else{
+     const query=id?sb.from("citas").update(data).eq("id",Number(id)):sb.from("citas").insert(withClinica(data));
+     r=await query.select("id").single();
+   }
    if(r.error){
      if(r.error.code==="PGRST116")throw new Error(id?"No se pudo actualizar la cita: no se ha confirmado una única fila. Recarga la agenda y vuelve a abrir la cita. Para crear otra, pulsa + Nueva cita.":"No se pudo confirmar el alta. Recarga la agenda antes de intentarlo otra vez.");
      throw r.error;
@@ -242,7 +256,7 @@ async function saveCita(){
    alert("Cita guardada, pero no se pudo recargar la agenda. Recarga la página antes de volver a guardarla: "+e.message);
  }
 }
-async function deleteCita(id){if(confirm("¿Borrar cita?")){await sb.from("citas").delete().eq("id",id); await registrarLog("borrar","citas",id,"Cita borrada"); await loadCloud()}}
+async function deleteCita(id){if(!esAdmin())return alert("Solo el administrador puede borrar citas.");if(confirm("¿Borrar cita?")){await sb.from("citas").delete().eq("id",id); await registrarLog("borrar","citas",id,"Cita borrada"); await loadCloud()}}
 
 function renderPacientes(){const q=(buscarPaciente?.value||"").toLowerCase(); pacientesList.innerHTML=pacientes.filter(p=>p.nombre.toLowerCase().includes(q)).map(p=>`<div class="item"><b>${p.nombre}</b><p>${p.telefono||""} · ${p.nif||""}</p><div class="row"><button class="btn light" onclick="editPaciente(${p.id})">Editar</button><button class="btn ghost" onclick="deletePaciente(${p.id})">Borrar</button></div></div>`).join("")||"<p>Sin pacientes.</p>"}
 function newPaciente(){
@@ -280,6 +294,7 @@ async function savePaciente(){
     notas:pacNotas.value
   };
 
+  if(!["admin","fisio","recepcion"].includes(rolActual()))return alert("Tu perfil no permite guardar pacientes.");
   if(!data.nombre) return alert("Escribe el nombre del paciente");
 
   const original=id?paciente(id):null;
@@ -289,7 +304,10 @@ async function savePaciente(){
   guardandoPaciente=true;
   let r;
   try{
-  if(id){
+  if(esRecepcion()){
+    const {notas,...allowed}=data;
+    r=await sb.rpc("amr_recepcion_pacientes",{p_clinica_id:clinicaId(),p_accion:id?"modificar":"crear",p_datos:{...allowed,...(id?{id:Number(id)}:{})}});
+  }else if(id){
     r=await sb
       .from("pacientes")
       .update(data)
@@ -313,7 +331,7 @@ async function savePaciente(){
   await loadCloud();
   alert("Paciente guardado");
 }
-async function deletePaciente(id){if(confirm("¿Borrar paciente?")){await sb.from("pacientes").delete().eq("id",id); await registrarLog("borrar","pacientes",id,"Paciente borrado"); await loadCloud()}}
+async function deletePaciente(id){alert("El borrado de pacientes está deshabilitado para conservar su historial.");}
 
 function loadHistoriaToForm(){const pid=Number(histPaciente.value||selectedPacienteId||0); const h=historias.find(x=>x.paciente_id==pid)||{}; histMotivo.value=h.motivo||"";histExploracion.value=h.exploracion||"";histDiagnostico.value=h.diagnostico||"";histObjetivos.value=h.objetivos||"";histEjercicios.value=h.ejercicios||"";renderEvoluciones(h.evoluciones||[])}
 function renderEvoluciones(evos){evolucionesList.innerHTML=(evos||[]).map(e=>`<div class="item"><b>${new Date(e.fecha).toLocaleString("es-ES")}</b><p>${e.texto}</p></div>`).join("")||"<p>Sin evoluciones.</p>"}
@@ -672,13 +690,14 @@ document.addEventListener("change", e=>{
 
 
 /* ===== Usuarios / roles SaaS ===== */
-function rolActual(){return usuarioClinica?.rol || "admin";}
+function rolActual(){return usuarioClinica?.activo===true && rolesPermitidos.includes(usuarioClinica.rol)?usuarioClinica.rol:null;}
 function esAdmin(){return rolActual()==="admin";}
 function esFisio(){return rolActual()==="fisio";}
 function esRecepcion(){return rolActual()==="recepcion";}
 function esSupervisor(){return rolActual()==="supervisor";}
 
 async function cargarUsuariosClinica(){
+  if(!esAdmin()){usuariosClinica=[];return;}
   if(!clinicaActiva?.id){usuariosClinica=[];return;}
   try{
     const r=await sb.from("usuarios_clinica").select("*").eq("clinica_id",clinicaActiva.id).order("id",{ascending:true});
@@ -686,17 +705,33 @@ async function cargarUsuariosClinica(){
   }catch(e){usuariosClinica=[];}
 }
 
+const seccionesRol={
+ admin:["dashboard","agenda","pacientes","historia","legal","facturas","whatsappPro","iaClinica","configClinica","usuariosSec","auditoriaSec"],
+ fisio:["dashboard","agenda","pacientes","historia","legal","whatsappPro","iaClinica"],
+ recepcion:["dashboard","agenda","pacientes","facturas","whatsappPro"],
+ supervisor:["dashboard","agenda","pacientes","historia","legal","facturas","whatsappPro","iaClinica","auditoriaSec"]
+};
+function puedeVerSeccion(id){return (seccionesRol[rolActual()]||[]).includes(id)}
 function aplicarPermisosVisuales(){
-  const rol=rolActual();
-  document.querySelectorAll("[data-role='admin']").forEach(el=>{el.style.display=esAdmin()?"":"none";});
-  document.querySelectorAll("nav button").forEach(btn=>{
-    const txt=(btn.textContent||"").toLowerCase();
-    btn.style.display="";
-    if(rol==="recepcion" && (txt.includes("historia") || txt.includes("ia") || txt.includes("config") || txt.includes("usuarios"))) btn.style.display="none";
-    if(rol==="fisio" && (txt.includes("config") || txt.includes("usuarios"))) btn.style.display="none";
-  });
+ const rol=rolActual();
+ document.querySelectorAll("nav button").forEach(btn=>{
+   const id=btn.getAttribute("onclick")?.match(/showSection\('([^']+)'/)?.[1];
+   if(id)btn.style.display=puedeVerSeccion(id)?"":"none";
+ });
+ document.querySelectorAll("[data-role='admin']").forEach(el=>{el.style.display=esAdmin()?"":"none"});
+ const adminOnly=!(esAdmin());
+ document.querySelectorAll("[onclick^='deleteCita(']").forEach(el=>el.style.display=adminOnly?"none":"");
+ document.querySelectorAll("[onclick^='deletePaciente(']").forEach(el=>el.style.display="none");
+ // Notes and appointment reason are not part of the reception RPC projection.
+ for(const id of ["pacNotas","citaMotivo"]){
+   const el=document.getElementById(id);if(!el)continue;
+   el.disabled=rol==="recepcion" || rol==="supervisor";
+   el.style.display=rol==="recepcion"?"none":"";
+   if(el.previousElementSibling?.tagName==="LABEL")el.previousElementSibling.style.display=el.style.display;
+ }
+ const readOnly=rol==="supervisor";
+ document.querySelectorAll("[onclick='savePaciente()'],[onclick='saveCita()'],[onclick='saveHistoria()'],[onclick='addEvolucion()'],[onclick='saveLegal()'],[onclick='crearFactura()'],[onclick='guardarIAComoEvolucion()']").forEach(el=>el.disabled=readOnly);
 }
-
 function renderUsuariosClinica(){
   const box=document.getElementById("usuariosList");
   if(!box)return;
@@ -726,6 +761,7 @@ function editarUsuarioClinica(id){
 async function guardarUsuarioClinica(){
   if(!esAdmin())return alert("Solo el administrador puede crear usuarios.");
   if(!clinicaActiva?.id)return alert("No hay clínica activa.");
+  if(!usrAuthId.value || !["fisio","recepcion","supervisor"].includes(usrRol.value))return alert("Indica una cuenta y un rol de personal. Los administradores se gestionan fuera de esta pantalla.");
   const data={nombre:usrNombre.value,auth_user_id:usrAuthId.value||null,rol:usrRol.value,activo:usrActivo.value==="true",clinica_id:clinicaActiva.id};
   let r;
   const editId=usrNombre.dataset.editId;
@@ -741,6 +777,7 @@ async function toggleUsuarioClinica(id){
   if(!esAdmin())return alert("Solo admin.");
   const u=(usuariosClinica||[]).find(x=>x.id==id);
   if(!u)return;
+  if(u.rol==="admin" || u.auth_user_id===usuarioClinica.auth_user_id)return alert("No puedes desactivar esta cuenta desde la aplicación.");
   const r=await sb.from("usuarios_clinica").update({activo:!(u.activo!==false)}).eq("id",id);
   if(r.error)return alert(r.error.message);
   await registrarLog("modificar","usuarios_clinica",id,`Usuario ${u.nombre||""} ${u.activo===false?"activado":"desactivado"}`);
@@ -763,6 +800,7 @@ async function registrarLog(accion, tabla, registro_id, detalle){
 }
 
 async function cargarLogsSistema(){
+  if(!esAdmin()&&!esSupervisor()){logsSistema=[];return;}
   const box=document.getElementById("logsList");
   try{
     const id=clinicaId();
