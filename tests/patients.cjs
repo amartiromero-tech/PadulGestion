@@ -5,8 +5,12 @@ const path = require('node:path');
 const source = readFileSync(process.argv[2] || path.join(__dirname, '../app.js'), 'utf8');
 const writes = [], alerts = [];
 let fail = false;
+let confirmRename=true;
+const confirmations=[];
+const title={textContent:""};
 const context = {
-  document:{addEventListener(){}},
+  document:{addEventListener(){},getElementById:()=>title},
+  confirm:message=>{confirmations.push(message);return confirmRename;},
   localStorage:{getItem:()=>null},
   alert:message=>alerts.push(message),
   supabase:{createClient:()=>({from:table=>({
@@ -36,6 +40,16 @@ vm.runInContext(`
   console.log('PASS: consecutive new patients insert despite selected existing patient');
 
   context.editPaciente(7);
+  assert.match(title.textContent,/Original/);
+  context.pacNombre.value='Otra persona';
+  confirmRename=false;
+  const writesBeforeRename=writes.length;
+  await context.savePaciente();
+  assert.equal(writes.length,writesBeforeRename);
+  assert.match(confirmations.at(-1),/Original.*Otra persona/);
+  confirmRename=true;
+  assert.equal(context.pacienteId.value,7);
+  context.pacNombre.value='Original';
   assert.equal(context.pacNombre.value,'Original');
   context.pacNombre.value='Edited';
   await context.savePaciente();
@@ -58,6 +72,17 @@ vm.runInContext(`
   await context.savePaciente();
   assert.equal(writes.at(-1).op,'insert');
   console.log('PASS: edit target independent of selection; New clears form and inserts');
+  const html=readFileSync(path.join(__dirname,'../index.html'),'utf8');
+  const handler=html.match(/onclick="([^"]*)">Pacientes<\/button>/)[1];
+  context.showSection=()=>{};
+  context.editPaciente(7);
+  vm.runInContext(handler,context);
+  assert.equal(context.pacienteId.value,'');
+  assert.equal(title.textContent,'Nuevo paciente');
+  context.pacNombre.value='Alta desde navegación';
+  await context.savePaciente();
+  assert.equal(writes.at(-1).op,'insert');
+  console.log('PASS: navigation clears stale edit and saves a new patient');
 
   fail=true;
   context.editPaciente(7);

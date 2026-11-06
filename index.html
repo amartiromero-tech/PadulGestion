@@ -36,7 +36,7 @@
       <nav>
         <button class="active" onclick="showSection('dashboard', this)">Inicio</button>
         <button onclick="showSection('agenda', this)">Agenda</button>
-        <button onclick="showSection('pacientes', this)">Pacientes</button>
+        <button onclick="newPaciente();showSection('pacientes', this)">Pacientes</button>
         <button onclick="showSection('historia', this)">Historia</button>
         <button onclick="showSection('legal', this)">Legal/Firmas</button>
         <button onclick="showSection('facturas', this)">Facturas</button>
@@ -116,7 +116,7 @@
       <section id="pacientes" class="section">
         <div class="grid two">
           <div class="card">
-            <h2>Nuevo / editar paciente</h2>
+            <h2 id="pacienteFormTitulo">Nuevo paciente</h2>
             <div class="form">
               <input type="hidden" id="pacienteId">
               <label>Nombre</label><input id="pacNombre">

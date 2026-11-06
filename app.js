@@ -237,6 +237,8 @@ async function deleteCita(id){if(confirm("¿Borrar cita?")){await sb.from("citas
 
 function renderPacientes(){const q=(buscarPaciente?.value||"").toLowerCase(); pacientesList.innerHTML=pacientes.filter(p=>p.nombre.toLowerCase().includes(q)).map(p=>`<div class="item"><b>${p.nombre}</b><p>${p.telefono||""} · ${p.nif||""}</p><div class="row"><button class="btn light" onclick="editPaciente(${p.id})">Editar</button><button class="btn ghost" onclick="deletePaciente(${p.id})">Borrar</button></div></div>`).join("")||"<p>Sin pacientes.</p>"}
 function newPaciente(){
+  const titulo=document.getElementById?.("pacienteFormTitulo");
+  if(titulo)titulo.textContent="Nuevo paciente";
   pacienteId.value="";
   pacNombre.value="";
   pacTelefono.value="";
@@ -246,6 +248,9 @@ function newPaciente(){
 }
 function editPaciente(id){
   const p=paciente(id);
+  if(!p.id)return;
+  const titulo=document.getElementById?.("pacienteFormTitulo");
+  if(titulo)titulo.textContent="Editando paciente: "+p.nombre;
   selectedPacienteId=id;
   pacienteId.value=p.id;
   pacNombre.value=p.nombre||"";
@@ -254,9 +259,12 @@ function editPaciente(id){
   pacDireccion.value=p.direccion||"";
   pacNotas.value=p.notas||"";
 }
+let guardandoPaciente=false;
 async function savePaciente(){
+  if(guardandoPaciente)return;
+  const id=pacienteId.value;
   const data={
-    nombre:pacNombre.value,
+    nombre:pacNombre.value.trim(),
     telefono:pacTelefono.value,
     nif:pacNif.value,
     direccion:pacDireccion.value,
@@ -265,20 +273,31 @@ async function savePaciente(){
 
   if(!data.nombre) return alert("Escribe el nombre del paciente");
 
-  let r;
+  const original=id?paciente(id):null;
+  if(id && !original?.id)return alert("No se encuentra el paciente. Recarga la página.");
+  if(id && data.nombre!==original.nombre && !confirm(`¿Cambiar el nombre de "${original.nombre}" a "${data.nombre}"? Si quieres dar de alta a otra persona, pulsa Cancelar y después Nuevo paciente.`))return;
 
-  if(pacienteId.value){
+  guardandoPaciente=true;
+  let r;
+  try{
+  if(id){
     r=await sb
       .from("pacientes")
       .update(data)
-      .eq("id",Number(pacienteId.value));
+      .eq("id",Number(id));
   }else{
     r=await sb
       .from("pacientes")
       .insert(withClinica(data));
   }
 
-  if(r.error) return alert("Error guardando paciente: "+r.error.message);
+  if(r.error)throw r.error;
+  }catch(e){
+    alert("Error guardando paciente: "+e.message);
+    return;
+  }finally{
+    guardandoPaciente=false;
+  }
 
   newPaciente();
 
