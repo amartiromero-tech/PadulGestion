@@ -35,7 +35,7 @@
       </div>
       <nav>
         <button class="active" onclick="showSection('dashboard', this)">Inicio</button>
-        <button onclick="showSection('agenda', this)">Agenda</button>
+        <button onclick="newCita();showSection('agenda', this)">Agenda</button>
         <button onclick="newPaciente();showSection('pacientes', this)">Pacientes</button>
         <button onclick="showSection('historia', this)">Historia</button>
         <button onclick="showSection('legal', this)">Legal/Firmas</button>
@@ -90,7 +90,7 @@
       <section id="agenda" class="section">
         <div class="grid two">
           <div class="card">
-            <h2>Nueva / editar cita</h2>
+            <h2 id="citaFormTitulo">Nueva cita</h2>
             <button class="btn light" onclick="newCita()">+ Nueva cita</button>
             <div class="form">
               <input type="hidden" id="citaId">
