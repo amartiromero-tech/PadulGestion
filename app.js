@@ -337,8 +337,66 @@ async function deletePaciente(id){alert("El borrado de pacientes está deshabili
 
 function loadHistoriaToForm(){const pid=Number(histPaciente.value||selectedPacienteId||0); const h=historias.find(x=>x.paciente_id==pid)||{}; histMotivo.value=h.motivo||"";histExploracion.value=h.exploracion||"";histDiagnostico.value=h.diagnostico||"";histObjetivos.value=h.objetivos||"";histEjercicios.value=h.ejercicios||"";renderEvoluciones(h.evoluciones||[])}
 function renderEvoluciones(evos){evolucionesList.innerHTML=(evos||[]).map(e=>`<div class="item"><b>${new Date(e.fecha).toLocaleString("es-ES")}</b><p>${e.texto}</p></div>`).join("")||"<p>Sin evoluciones.</p>"}
-async function saveHistoria(){const pid=Number(histPaciente.value||0); if(!pid)return alert("Selecciona paciente"); const old=historias.find(x=>x.paciente_id==pid); const data={paciente_id:pid,motivo:histMotivo.value,exploracion:histExploracion.value,diagnostico:histDiagnostico.value,objetivos:histObjetivos.value,ejercicios:histEjercicios.value,evoluciones:old?.evoluciones||[],updated_at:new Date().toISOString()}; const r=old?await sb.from("historias_clinicas").update(data).eq("id",old.id):await sb.from("historias_clinicas").insert(withClinica(data)); if(r.error)return alert("Error: "+r.error.message); await registrarLog(old?"modificar":"crear","historias_clinicas",pid,`Historia clínica de ${paciente(pid).nombre||"paciente"}`); await loadCloud(); alert("Historia guardada")}
-async function addEvolucion(){const pid=Number(histPaciente.value||0); const txt=nuevaEvolucion.value.trim(); if(!pid||!txt)return alert("Selecciona paciente y escribe evolución"); let old=historias.find(x=>x.paciente_id==pid); let evos=old?.evoluciones||[]; evos.unshift({fecha:new Date().toISOString(),texto:txt}); if(!old){await sb.from("historias_clinicas").insert(withClinica({paciente_id:pid,evoluciones:evos,updated_at:new Date().toISOString()}))}else{await sb.from("historias_clinicas").update({evoluciones:evos,updated_at:new Date().toISOString()}).eq("id",old.id)} nuevaEvolucion.value=""; await loadCloud();}
+let guardandoHistoria=false;
+async function guardarHistoriaPaciente(pid, campos={}, evolucion=null){
+ if(guardandoHistoria)return null;
+ if(!pid)return alert("Selecciona paciente");
+ if(!["admin","fisio"].includes(rolActual()))return alert("Tu perfil no permite guardar historias clínicas.");
+ const epoch=accessEpoch, clinic=clinicaId();
+ guardandoHistoria=true;
+ try{
+   // Read the latest persisted history; never mutate the cached evolutions before confirmation.
+   const current=await sb.from("historias_clinicas").select("*").eq("clinica_id",clinic).eq("paciente_id",pid).maybeSingle();
+   if(current.error)throw current.error;
+   if(epoch!==accessEpoch)return null;
+   const anterior=current.data;
+   const data={...campos,updated_at:new Date().toISOString()};
+   if(evolucion){
+     if(anterior?.evoluciones!=null && !Array.isArray(anterior.evoluciones))throw new Error("El formato de las evoluciones requiere revisión.");
+     data.evoluciones=[{fecha:new Date().toISOString(),texto:evolucion},...(anterior?.evoluciones||[])];
+   }
+   let query;
+   if(anterior){
+     query=sb.from("historias_clinicas").update(data).eq("id",anterior.id).eq("clinica_id",clinic).eq("paciente_id",pid);
+     query=anterior.updated_at==null?query.is("updated_at",null):query.eq("updated_at",anterior.updated_at);
+   }else{
+     query=sb.from("historias_clinicas").insert({...data,paciente_id:pid,clinica_id:clinic});
+   }
+   const result=await query.select("*").single();
+   if(result.error){
+     if(result.error.code==="PGRST116")throw new Error("No se pudo confirmar el guardado. La historia puede haber cambiado en otra sesión; vuelve a consultarla antes de reintentar.");
+     throw result.error;
+   }
+   if(!result.data?.id)throw new Error("El servidor no ha confirmado la historia guardada.");
+   if(epoch!==accessEpoch)return null;
+   const index=historias.findIndex(h=>h.id==result.data.id);
+   if(index<0)historias.push(result.data);else historias[index]=result.data;
+   if(Number(histPaciente.value)===pid){
+     try{renderEvoluciones(result.data.evoluciones||[]);}catch(e){alert("Historia guardada, pero no se pudo actualizar la pantalla. Recarga la historia para verla.");}
+   }
+   return result.data;
+ }catch(e){
+   if(epoch===accessEpoch)alert("No se pudo guardar la historia: "+e.message+" El texto se conserva para que puedas revisarlo.");
+   return null;
+ }finally{
+   guardandoHistoria=false;
+ }
+}
+async function saveHistoria(){
+ const pid=Number(histPaciente.value||0);
+ const data={motivo:histMotivo.value,exploracion:histExploracion.value,diagnostico:histDiagnostico.value,objetivos:histObjetivos.value,ejercicios:histEjercicios.value};
+ const saved=await guardarHistoriaPaciente(pid,data);
+ if(saved)alert("Historia guardada");
+}
+async function addEvolucion(){
+ const pid=Number(histPaciente.value||0), original=nuevaEvolucion.value, texto=original.trim();
+ if(!pid||!texto)return alert("Selecciona paciente y escribe evolución");
+ const saved=await guardarHistoriaPaciente(pid,{},texto);
+ if(!saved)return;
+ // Do not erase text typed while the request was running, or a different patient's draft.
+ if(Number(histPaciente.value)===pid && nuevaEvolucion.value===original)nuevaEvolucion.value="";
+ alert("Evolución guardada");
+}
 
 function renderLegalDoc(){const d=legalDocs[legalTipo.value]||legalDocs.rgpd; legalTitulo.textContent=d[0]; legalTexto.textContent=d[1];}
 function setupFirma(){
@@ -662,18 +720,11 @@ function copiarIA(){
 }
 
 async function guardarIAComoEvolucion(){
-  const pid=Number(document.getElementById("iaPaciente")?.value||selectedPacienteId||0);
-  const texto=document.getElementById("iaResultado")?.value||"";
-  if(!pid||!texto)return alert("Selecciona paciente y genera texto.");
-  let old=(historias||[]).find(x=>x.paciente_id==pid);
-  let evos=old?.evoluciones||[];
-  evos.unshift({fecha:new Date().toISOString(),texto});
-  let r;
-  if(!old) r=await sb.from("historias_clinicas").insert(withClinica({paciente_id:pid,evoluciones:evos,updated_at:new Date().toISOString()}));
-  else r=await sb.from("historias_clinicas").update({evoluciones:evos,updated_at:new Date().toISOString()}).eq("id",old.id);
-  if(r.error)return alert(r.error.message);
-  alert("Guardado como evolución.");
-  await loadCloud();
+ const pid=Number(document.getElementById("iaPaciente")?.value||selectedPacienteId||0);
+ const texto=(document.getElementById("iaResultado")?.value||"").trim();
+ if(!pid||!texto)return alert("Selecciona paciente y genera texto.");
+ const saved=await guardarHistoriaPaciente(pid,{},texto);
+ if(saved)alert("Guardado como evolución.");
 }
 
 const __oldRenderPro = render;
