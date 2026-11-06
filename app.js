@@ -2,7 +2,8 @@ let accessEpoch=0;
 const rolesPermitidos=["admin","fisio","recepcion","supervisor"];
 function limpiarAcceso(){
  accessEpoch++;
- facturaVisible=null;revisionFacturas++;
+ facturaVisible=null;revisionFacturas++;revisionWa++;
+ const permisoWa=document.getElementById("waPermiso");if(permisoWa)permisoWa.checked=false;
  pacientes=[];citas=[];consentimientos=[];firmasSesiones=[];historias=[];facturas=[];usuariosClinica=[];logsSistema=[];
  usuarioClinica=null;clinicaActiva=null;selectedPacienteId=null;citaEditId=null;
  localStorage.removeItem("amr_bypass");localStorage.removeItem("clinica_id");
@@ -161,6 +162,7 @@ function showSection(id, btn){
  document.getElementById(id)?.classList.add("active");
  if(btn){document.querySelectorAll("nav button").forEach(b=>b.classList.remove("active"));btn.classList.add("active")}
  render();
+ if(id==="whatsappPro")cargarWaAutomatico();
  if(id==="legal"){setTimeout(setupFirma,250);setTimeout(setupFirma,700);}
 }
 
@@ -1020,4 +1022,63 @@ function exportarLogsSistema(){
     a.remove();
     URL.revokeObjectURL(url);
   },1000);
+}
+
+
+/* Preparación únicamente: no conecta con Meta ni envía mensajes. */
+let revisionWa=0,guardandoWa=false;
+async function cargarWaAutomatico(conservarBorrador=false){
+ const box=document.getElementById("waAutoEstado");if(!box)return;
+ const epoch=accessEpoch,revision=++revisionWa,pid=Number(waPaciente.value);
+ if(!conservarBorrador){waPermiso.checked=false;waFuente.value=""}
+ waPermiso.disabled=true;waFuente.disabled=true;waGuardarPermiso.disabled=true;
+ waSimular.disabled=!esAdmin();waRegistro.innerHTML="";
+ box.textContent="Envío automático desactivado. Conexión de Meta pendiente.";
+ try{
+  const clinic=clinicaId();
+  const [permiso,registro]=await Promise.all([
+   pid?sb.from("whatsapp_permisos").select("*").eq("clinica_id",clinic).eq("paciente_id",pid).maybeSingle():Promise.resolve({data:null}),
+   sb.from("whatsapp_recordatorios").select("*").eq("clinica_id",clinic).order("created_at",{ascending:false}).limit(50)
+  ]);
+  if(epoch!==accessEpoch || revision!==revisionWa || Number(waPaciente.value)!==pid)return;
+  if(permiso.error)throw permiso.error;if(registro.error)throw registro.error;
+  const p=paciente(pid),a=permiso.data;
+  const vigente=a?.permitido===true && a.telefono===telefonoLimpio(p.telefono);
+  if(!conservarBorrador){waPermiso.checked=vigente;waFuente.value=a?.fuente||""}
+  const editable=!!p.id && ["admin","fisio","recepcion"].includes(rolActual());
+  waPermiso.disabled=!editable;waFuente.disabled=!editable;waGuardarPermiso.disabled=!editable;
+  if(a?.permitido && !vigente)box.textContent+=" El teléfono ha cambiado: registra de nuevo el permiso.";
+  waRegistro.innerHTML=(registro.data||[]).map(r=>'<div class="item"><b>'+(r.estado==="simulado"?"Simulación · no enviado":"Cancelado · no enviado")+'</b><p>'+escapeFactura(r.mensaje)+'</p><p>Recordatorio previsto: '+escapeFactura(new Date(r.programado_para).toLocaleString("es-ES",{timeZone:"Europe/Madrid"}))+'</p></div>').join("")||"<p>No hay simulaciones ni envíos registrados.</p>";
+ }catch(e){if(epoch===accessEpoch && revision===revisionWa)box.textContent="Envío desactivado. No se pudo cargar la preparación: "+(e.message||e)}
+}
+async function guardarWaPermiso(){
+ if(guardandoWa)return;
+ const epoch=accessEpoch,pid=Number(waPaciente.value),permitido=waPermiso.checked,fuente=waFuente.value.trim();
+ try{
+  if(!["admin","fisio","recepcion"].includes(rolActual()))throw new Error("Tu perfil no permite registrar permisos.");
+  if(!pid || !paciente(pid).id)throw new Error("Selecciona paciente.");
+  if(!fuente)throw new Error("Indica cómo y cuándo se obtuvo o retiró el permiso.");
+  guardandoWa=true;
+  const result=await sb.rpc("amr_whatsapp_permiso",{p_clinica_id:clinicaId(),p_paciente_id:pid,p_permitido:permitido,p_fuente:fuente});
+  if(epoch!==accessEpoch)return;
+  if(result.error)throw result.error;
+  if(!result.data || result.data.paciente_id!==pid || result.data.permitido!==permitido)throw new Error("No se ha confirmado el permiso.");
+  alert("Permiso registrado. El envío automático continúa desactivado.");
+  if(Number(waPaciente.value)===pid && waPermiso.checked===permitido && waFuente.value.trim()===fuente)await cargarWaAutomatico();
+ }catch(e){if(epoch===accessEpoch)alert("No se pudo registrar el permiso: "+(e.message||e))}
+ finally{guardandoWa=false}
+}
+async function simularWaRecordatorios(){
+ if(guardandoWa)return;
+ const epoch=accessEpoch;
+ try{
+  if(!esAdmin())throw new Error("Solo administración puede generar la simulación.");
+  guardandoWa=true;
+  const result=await sb.rpc("amr_whatsapp_simular",{p_clinica_id:clinicaId()});
+  if(epoch!==accessEpoch)return;
+  if(result.error)throw result.error;
+  alert("Simulación terminada: "+result.data+" recordatorios nuevos. No se ha enviado ningún WhatsApp.");
+  await cargarWaAutomatico(true);
+ }catch(e){if(epoch===accessEpoch)alert("No se pudo completar la simulación: "+(e.message||e))}
+ finally{guardandoWa=false}
 }

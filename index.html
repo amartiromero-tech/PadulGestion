@@ -219,12 +219,26 @@
           </div>
         </header>
 
+        <div class="card">
+          <h2>Recordatorios automáticos · preparación</h2>
+          <p id="waAutoEstado">Envío automático desactivado. Conexión de Meta pendiente.</p>
+          <p>Se prepara un recordatorio 24 horas antes, con fecha y hora y sin información clínica. La simulación revisa las citas de las próximas 24 horas, con horario de Madrid.</p>
+          <p>Selecciona el paciente en «Mensaje rápido» para consultar o registrar su permiso.</p>
+          <label class="check"><input id="waPermiso" type="checkbox" disabled> El paciente ha autorizado recibir recordatorios por WhatsApp en su teléfono actual.</label>
+          <label for="waFuente">Cómo y cuándo se obtuvo o retiró el permiso</label>
+          <input id="waFuente" maxlength="500" placeholder="Ej.: autorización firmada, fecha y referencia" disabled>
+          <button id="waGuardarPermiso" class="btn" onclick="guardarWaPermiso()" disabled>Registrar permiso / retirada</button>
+          <button id="waSimular" class="btn light" onclick="simularWaRecordatorios()" disabled>Simular recordatorios · no enviar</button>
+          <button class="btn light" onclick="cargarWaAutomatico()">Actualizar registro</button>
+          <h3>Registro de simulaciones · últimos 50</h3>
+          <div id="waRegistro" class="list"></div>
+        </div>
         <div class="grid two">
           <div class="card">
             <h2>Mensaje rápido</h2>
             <div class="form">
               <label>Paciente</label>
-              <select id="waPaciente" onchange="renderWaCitas();generarWhatsappPro()"></select>
+              <select id="waPaciente" onchange="renderWaCitas();generarWhatsappPro();cargarWaAutomatico()"></select>
 
               <label>Cita</label>
               <select id="waCita" onchange="generarWhatsappPro()"></select>
