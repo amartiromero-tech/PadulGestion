@@ -557,7 +557,7 @@
     {
       "name": "has_role",
       "schema": "amr_private",
-      "definition": "CREATE OR REPLACE FUNCTION amr_private.has_role(p_clinic bigint, p_roles text[])\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\nSELECT auth.uid() IS NOT NULL AND EXISTS (\nSELECT 1 FROM public.usuarios_clinica m WHERE m.auth_user_id=auth.uid()\nAND m.clinica_id=p_clinic AND m.activo IS TRUE AND m.rol=ANY(p_roles));\n$function$\n"
+      "definition": "CREATE OR REPLACE FUNCTION amr_private.has_role(p_clinic bigint, p_roles text[])\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n SELECT auth.uid() IS NOT NULL AND COALESCE((\n  SELECT count(DISTINCT m.rol)=1 AND bool_and(COALESCE(m.rol=ANY(p_roles),false))\n  FROM public.usuarios_clinica m\n  WHERE m.auth_user_id=auth.uid() AND m.clinica_id=p_clinic AND m.activo IS TRUE\n ),false);\n$function$\n"
     },
     {
       "name": "clinic_immutable",

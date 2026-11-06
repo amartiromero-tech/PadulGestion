@@ -5,6 +5,7 @@ function limpiarAcceso(){
  pacientes=[];citas=[];consentimientos=[];firmasSesiones=[];historias=[];facturas=[];usuariosClinica=[];logsSistema=[];
  usuarioClinica=null;clinicaActiva=null;selectedPacienteId=null;citaEditId=null;
  localStorage.removeItem("amr_bypass");localStorage.removeItem("clinica_id");
+ const password=document.getElementById("loginPassword");if(password)password.value="";
  document.querySelectorAll(".section input,.section textarea,.section select").forEach(el=>{el.value=""});
  document.querySelectorAll(".section .list,#weeklyCalendar,#facturaPreview,#printArea,#iaResultado,#waTexto").forEach(el=>{el.textContent=""});
  document.querySelectorAll(".section").forEach(el=>el.classList.remove("active"));
@@ -117,6 +118,7 @@ async function login(){
  loginMsg.textContent="";
  try{
    const {error}=await sb.auth.signInWithPassword({email:loginEmail.value.trim(),password:loginPassword.value});
+   loginPassword.value="";
    if(error)throw error;
    await checkLogin();
  }catch(e){limpiarAcceso();loginMsg.textContent=e.message;}
@@ -190,7 +192,7 @@ function renderCalendar(){
  weeklyCalendar.innerHTML=out;
 }
 function renderToday(){const today=selectedDate; const arr=citas.filter(c=>c.fecha===today).sort((a,b)=>String(a.hora).localeCompare(String(b.hora))); todayList.innerHTML=arr.map(c=>citaItem(c)).join("")||"<p>No hay citas.</p>"}
-function citaItem(c){const p=paciente(c.paciente_id);return `<div class="item"><b>${c.hora} · ${p.nombre||"Paciente"}</b><p>${c.fecha} · ${c.motivo||""} · ${eur(c.precio)} · ${c.estado||""}</p><div class="row"><button class="btn light" onclick="editCita(${c.id})">Editar</button><button class="btn ghost" onclick="deleteCita(${c.id})">Borrar</button></div></div>`}
+function citaItem(c){const p=paciente(c.paciente_id);return `<div class="item"><b>${c.hora} · ${p.nombre||"Paciente"}</b><p>${c.fecha} · ${c.motivo||""} · ${eur(c.precio)} · ${c.estado||""}</p><div class="row"><button class="btn light" onclick="editCita(${c.id})">Editar</button>${esAdmin()?`<button class="btn ghost" onclick="deleteCita(${c.id})">Borrar</button>`:""}</div></div>`}
 function renderCitas(){allCitas.innerHTML=[...citas].sort((a,b)=>(b.fecha+b.hora).localeCompare(a.fecha+a.hora)).slice(0,80).map(citaItem).join("")||"<p>Sin citas.</p>"}
 let guardandoCita=false, citaEditId=null;
 function newCita(fecha=localISO(new Date()), hora="09:00"){
@@ -258,7 +260,7 @@ async function saveCita(){
 }
 async function deleteCita(id){if(!esAdmin())return alert("Solo el administrador puede borrar citas.");if(confirm("¿Borrar cita?")){await sb.from("citas").delete().eq("id",id); await registrarLog("borrar","citas",id,"Cita borrada"); await loadCloud()}}
 
-function renderPacientes(){const q=(buscarPaciente?.value||"").toLowerCase(); pacientesList.innerHTML=pacientes.filter(p=>p.nombre.toLowerCase().includes(q)).map(p=>`<div class="item"><b>${p.nombre}</b><p>${p.telefono||""} · ${p.nif||""}</p><div class="row"><button class="btn light" onclick="editPaciente(${p.id})">Editar</button><button class="btn ghost" onclick="deletePaciente(${p.id})">Borrar</button></div></div>`).join("")||"<p>Sin pacientes.</p>"}
+function renderPacientes(){const q=(buscarPaciente?.value||"").toLowerCase(); pacientesList.innerHTML=pacientes.filter(p=>p.nombre.toLowerCase().includes(q)).map(p=>`<div class="item"><b>${p.nombre}</b><p>${p.telefono||""} · ${p.nif||""}</p><div class="row"><button class="btn light" onclick="editPaciente(${p.id})">Editar</button></div></div>`).join("")||"<p>Sin pacientes.</p>"}
 function newPaciente(){
   const titulo=document.getElementById?.("pacienteFormTitulo");
   if(titulo)titulo.textContent="Nuevo paciente";
@@ -678,6 +680,7 @@ const __oldRenderPro = render;
 render = function(){
   __oldRenderPro();
   fillProSelects();
+  aplicarPermisosVisuales();
 };
 
 document.addEventListener("change", e=>{
