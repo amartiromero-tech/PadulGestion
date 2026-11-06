@@ -139,6 +139,7 @@ async function loadCloud(){
    sb.from("historias_clinicas").select("*").or(`clinica_id.eq.${id},clinica_id.is.null`).order("updated_at",{ascending:false}),
    sb.from("facturas").select("*").or(`clinica_id.eq.${id},clinica_id.is.null`).order("id",{ascending:false})
  ]);
+ if(c.error)throw new Error("Error cargando citas: "+c.error.message);
  pacientes=p.data||[]; citas=c.data||[]; consentimientos=co.data||[]; firmasSesiones=fs.data||[]; historias=h.data||[]; facturas=f.data||[];
  selectedPacienteId=selectedPacienteId||pacientes[0]?.id||null;
  render();
@@ -184,9 +185,54 @@ function renderCalendar(){
 function renderToday(){const today=selectedDate; const arr=citas.filter(c=>c.fecha===today).sort((a,b)=>String(a.hora).localeCompare(String(b.hora))); todayList.innerHTML=arr.map(c=>citaItem(c)).join("")||"<p>No hay citas.</p>"}
 function citaItem(c){const p=paciente(c.paciente_id);return `<div class="item"><b>${c.hora} · ${p.nombre||"Paciente"}</b><p>${c.fecha} · ${c.motivo||""} · ${eur(c.precio)} · ${c.estado||""}</p><div class="row"><button class="btn light" onclick="editCita(${c.id})">Editar</button><button class="btn ghost" onclick="deleteCita(${c.id})">Borrar</button></div></div>`}
 function renderCitas(){allCitas.innerHTML=[...citas].sort((a,b)=>(b.fecha+b.hora).localeCompare(a.fecha+a.hora)).slice(0,80).map(citaItem).join("")||"<p>Sin citas.</p>"}
-function newCita(fecha=localISO(new Date()), hora="09:00"){showSection("agenda");citaId.value="";citaFecha.value=fecha;citaHora.value=hora;citaPaciente.value=selectedPacienteId||""}
-function editCita(id){const c=citas.find(x=>x.id==id);if(!c)return;showSection("agenda");citaId.value=c.id;citaPaciente.value=c.paciente_id;citaFecha.value=c.fecha;citaHora.value=c.hora;citaMotivo.value=c.motivo||"";citaPrecio.value=c.precio||35;citaEstado.value=c.estado||"Confirmada"}
-async function saveCita(){const data={paciente_id:Number(citaPaciente.value),fecha:citaFecha.value,hora:citaHora.value,motivo:citaMotivo.value,precio:Number(citaPrecio.value||0),estado:citaEstado.value}; if(!data.paciente_id)return alert("Selecciona paciente"); const r=citaId.value?await sb.from("citas").update(data).eq("id",Number(citaId.value)):await sb.from("citas").insert(withClinica(data)); if(r.error)return alert(r.error.message); await registrarLog(citaId.value?"modificar":"crear","citas",citaId.value||"",`Cita ${data.fecha} ${data.hora} · ${data.motivo||""}`); await loadCloud();}
+let guardandoCita=false;
+function newCita(fecha=localISO(new Date()), hora="09:00"){
+ if(guardandoCita)return;
+ citaId.value="";
+ citaFecha.value=fecha;citaHora.value=hora;citaPaciente.value=selectedPacienteId||"";
+ citaMotivo.value="";citaPrecio.value=35;citaEstado.value="Confirmada";
+ showSection("agenda");
+}
+function editCita(id){
+ if(guardandoCita)return;
+ const c=citas.find(x=>x.id==id);if(!c)return;
+ showSection("agenda");citaId.value=c.id;citaPaciente.value=c.paciente_id;
+ citaFecha.value=c.fecha;citaHora.value=c.hora;citaMotivo.value=c.motivo||"";
+ citaPrecio.value=c.precio??35;citaEstado.value=c.estado||"Confirmada";
+}
+async function saveCita(){
+ if(guardandoCita)return;
+ const id=citaId.value;
+ const data={paciente_id:Number(citaPaciente.value),fecha:citaFecha.value,hora:citaHora.value,motivo:citaMotivo.value,precio:Number(citaPrecio.value||0),estado:citaEstado.value};
+ if(!data.paciente_id)return alert("Selecciona paciente");
+ if(!data.fecha||!data.hora)return alert("Indica fecha y hora");
+ guardandoCita=true;
+ let saved;
+ try{
+   const query=id?sb.from("citas").update(data).eq("id",Number(id)):sb.from("citas").insert(withClinica(data));
+   const r=await query.select("id").single();
+   if(r.error)throw r.error;
+   if(!r.data?.id)throw new Error("No se ha confirmado la cita guardada");
+   saved=r.data;
+ }catch(e){
+   alert("Error guardando cita: "+e.message);
+ }finally{
+   guardandoCita=false;
+ }
+ if(!saved)return;
+ // Once persisted, the next save must create a new appointment, even if reload fails.
+ newCita(data.fecha,data.hora);
+ try{
+   await registrarLog(id?"modificar":"crear","citas",saved.id,`Cita ${data.fecha} ${data.hora} · ${data.motivo||""}`);
+ }catch(e){
+   alert("Cita guardada, pero no se pudo registrar la actividad: "+e.message);
+ }
+ try{
+   await loadCloud();
+ }catch(e){
+   alert("Cita guardada, pero no se pudo recargar la agenda. Recarga la página antes de volver a guardarla: "+e.message);
+ }
+}
 async function deleteCita(id){if(confirm("¿Borrar cita?")){await sb.from("citas").delete().eq("id",id); await registrarLog("borrar","citas",id,"Cita borrada"); await loadCloud()}}
 
 function renderPacientes(){const q=(buscarPaciente?.value||"").toLowerCase(); pacientesList.innerHTML=pacientes.filter(p=>p.nombre.toLowerCase().includes(q)).map(p=>`<div class="item"><b>${p.nombre}</b><p>${p.telefono||""} · ${p.nif||""}</p><div class="row"><button class="btn light" onclick="editPaciente(${p.id})">Editar</button><button class="btn ghost" onclick="deletePaciente(${p.id})">Borrar</button></div></div>`).join("")||"<p>Sin pacientes.</p>"}
