@@ -520,7 +520,10 @@ async function crearFactura(){
   if(previa.data)throw new Error("Ese número ya está guardado. Actualiza el listado para consultarlo.");
   const result=await sb.from("facturas").insert(withClinica({numero,paciente_id:p.id,fecha:localISO(new Date()),concepto,cantidad,precio,total})).select("*").single();
   if(epoch!==accessEpoch)return;
-  if(result.error)throw result.error;
+  if(result.error){
+   if(result.error.code==="23505")throw new Error("Ese número ya se ha guardado, posiblemente desde otro dispositivo. Actualiza el listado");
+   throw result.error;
+  }
   if(!result.data?.id || result.data.clinica_id!==clinica)throw new Error("El servidor no ha confirmado el registro.");
   confirmada=true;
   revisionFacturas++;
@@ -547,30 +550,34 @@ function renderFacturas(){
  const list=document.getElementById("facturasList");if(!list)return;
  if(!["admin","recepcion","supervisor"].includes(rolActual())){list.innerHTML="";return}
  const rows=facturas.filter(f=>f.clinica_id===clinicaActiva?.id);
- list.innerHTML=rows.length?rows.map(f=>`<div class="item"><b>Factura ${escapeFactura(f.numero||"Sin número")}</b><div>${escapeFactura(fechaFactura(f.fecha))} · ${escapeFactura(paciente(f.paciente_id).nombre||"Paciente no disponible")} · ${dineroFactura(f.total)} €</div><p>${escapeFactura(f.concepto)}</p><button class="btn light" onclick="verFactura('${escapeFactura(String(f.id))}')">Ver / imprimir</button></div>`).join(""):"<p>No hay facturas guardadas.</p>";
+ list.innerHTML=rows.length?rows.map(f=>`<div class="item"><b>Factura ${escapeFactura(f.numero||"Sin número")}</b><div>${escapeFactura(fechaFactura(f.fecha))} · ${escapeFactura((f.datos_fiscales?.receptor||paciente(f.paciente_id)).nombre||"Paciente no disponible")} · ${dineroFactura(f.total)} €</div><p>${escapeFactura(f.concepto)}</p><button class="btn light" onclick="verFactura('${escapeFactura(String(f.id))}')">Ver / imprimir</button></div>`).join(""):"<p>No hay facturas guardadas.</p>";
 }
 function verFactura(id){
  try{
   const clinica=accesoFacturas();
   const f=facturas.find(row=>String(row.id)===String(id) && row.clinica_id===clinica);
   if(!f)throw new Error("La factura no está en el listado. Actualízalo.");
-  const p=paciente(f.paciente_id);
+  const p=f.datos_fiscales?.receptor||paciente(f.paciente_id);
+  const emisor=f.datos_fiscales?.emisor;
+  const empresa=emisor?`<b>${escapeFactura(emisor.nombre)}</b><br>${escapeFactura(emisor.comercial)}<br>${escapeFactura(emisor.direccion).replace(/\n/g,"<br>")}<br>Teléfonos: ${escapeFactura(emisor.telefono)}<br>NIF: ${escapeFactura(emisor.nif)}`:null;
   const {numero,concepto,cantidad,precio,total}=f;
   const fecha=fechaFactura(f.fecha);
   const html = `
   <div id="facturaAMR" class="facturaAMR">
+    ${f.datos_fiscales?"":'<p>Factura antigua sin copia de datos fiscales: se muestran los datos actuales del paciente.</p>'}
     <div class="facturaHeader">
       <div>
         <img src="${escapeFactura(window.AMR_LOGO || "")}" class="facturaLogo">
       </div>
       <div class="facturaEmpresa">
-        <b>Antonio Javier Martí Romero</b><br>
+        ${empresa||`        <b>Antonio Javier Martí Romero</b><br>
         AMR Clínicas de Fisioterapia<br>
         Calle Pósito, 14. Padul. Granada<br>
         Calle Ruiseñor, 9 Bajo. Granada<br>
         Calle Señor de la Expiración 6, Bajo. Lanjarón<br>
         Teléfonos: 958773665 - 698344334<br>
-        NIF: 74671815S
+        NIF: 74671815S`}
+
       </div>
     </div>
 
