@@ -42,7 +42,6 @@ OR NEW.auth_user_id IS DISTINCT FROM OLD.auth_user_id THEN
 RAISE EXCEPTION 'La identidad y la clinica de una membresia no se pueden cambiar' USING ERRCODE='42501';
 END IF; RETURN NEW; END $function$;
 
-
 CREATE OR REPLACE FUNCTION amr_private.has_role(p_clinic bigint, p_roles text[])
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=''
 AS $function$
@@ -53,14 +52,12 @@ AS $function$
  ),false);
 $function$;
 
-
 CREATE OR REPLACE FUNCTION amr_private.clinic_immutable()
  RETURNS trigger
  LANGUAGE plpgsql
  SET search_path TO ''
 AS $function$ BEGIN IF NEW.clinica_id IS DISTINCT FROM OLD.clinica_id OR NEW.id IS DISTINCT FROM OLD.id
 THEN RAISE EXCEPTION 'No se puede cambiar la identidad ni la clinica del registro' USING ERRCODE='42501'; END IF; RETURN NEW; END $function$;
-
 
 CREATE OR REPLACE FUNCTION amr_private.reception_pacientes(p_clinica_id bigint, p_accion text, p_datos jsonb DEFAULT '{}'::jsonb)
  RETURNS jsonb
@@ -85,21 +82,6 @@ ELSE RAISE EXCEPTION 'Operacion no permitida' USING ERRCODE='42501'; END IF;
 RETURN jsonb_build_object('id',r.id,'nombre',r.nombre,'telefono',r.telefono,'nif',r.nif,'direccion',r.direccion,'created_at',r.created_at,'clinica_id',r.clinica_id);
 END $function$;
 
-
-CREATE OR REPLACE FUNCTION public.amr_recepcion_pacientes(p_clinica_id bigint, p_accion text, p_datos jsonb DEFAULT '{}'::jsonb)
- RETURNS jsonb
- LANGUAGE sql
- SET search_path TO ''
-AS $function$ SELECT amr_private.reception_pacientes(p_clinica_id,p_accion,p_datos) $function$;
-
-
-CREATE OR REPLACE FUNCTION public.amr_recepcion_citas(p_clinica_id bigint, p_accion text, p_datos jsonb DEFAULT '{}'::jsonb)
- RETURNS jsonb
- LANGUAGE sql
- SET search_path TO ''
-AS $function$ SELECT amr_private.reception_citas(p_clinica_id,p_accion,p_datos) $function$;
-
-
 CREATE OR REPLACE FUNCTION amr_private.reception_citas(p_clinica_id bigint, p_accion text, p_datos jsonb DEFAULT '{}'::jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -122,6 +104,18 @@ IF NOT FOUND THEN RAISE EXCEPTION 'Registro no disponible' USING ERRCODE='42501'
 ELSE RAISE EXCEPTION 'Operacion no permitida' USING ERRCODE='42501'; END IF;
 RETURN jsonb_build_object('id',r.id,'paciente_id',r.paciente_id,'fecha',r.fecha,'hora',r.hora,'precio',r.precio,'estado',r.estado,'created_at',r.created_at,'clinica_id',r.clinica_id);
 END $function$;
+
+CREATE OR REPLACE FUNCTION public.amr_recepcion_pacientes(p_clinica_id bigint, p_accion text, p_datos jsonb DEFAULT '{}'::jsonb)
+ RETURNS jsonb
+ LANGUAGE sql
+ SET search_path TO ''
+AS $function$ SELECT amr_private.reception_pacientes(p_clinica_id,p_accion,p_datos) $function$;
+
+CREATE OR REPLACE FUNCTION public.amr_recepcion_citas(p_clinica_id bigint, p_accion text, p_datos jsonb DEFAULT '{}'::jsonb)
+ RETURNS jsonb
+ LANGUAGE sql
+ SET search_path TO ''
+AS $function$ SELECT amr_private.reception_citas(p_clinica_id,p_accion,p_datos) $function$;
 
 
 REVOKE ALL ON FUNCTION "amr_private"."member_identity_immutable"() FROM PUBLIC, anon, authenticated;
