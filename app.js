@@ -2,6 +2,7 @@ let accessEpoch=0;
 const rolesPermitidos=["admin","fisio","recepcion","supervisor"];
 function limpiarAcceso(){
  accessEpoch++;
+ facturaVisible=null;revisionFacturas++;
  pacientes=[];citas=[];consentimientos=[];firmasSesiones=[];historias=[];facturas=[];usuariosClinica=[];logsSistema=[];
  usuarioClinica=null;clinicaActiva=null;selectedPacienteId=null;citaEditId=null;
  localStorage.removeItem("amr_bypass");localStorage.removeItem("clinica_id");
@@ -480,20 +481,87 @@ function renderLegalHistory(){const pid=Number(legalPaciente.value||0); const do
 function printLegal(){const p=paciente(Number(legalPaciente.value)); const d=legalDocs[legalTipo.value]; printArea.innerHTML=`<h1>AMR Clínicas Fisioterapia</h1><h2>${d[0]}</h2><p><b>Paciente:</b> ${p.nombre||""}</p><p>${d[1]}</p><p><b>Observaciones:</b> ${legalNotas.value}</p><img src="${firmaData()}" style="width:360px;border:1px solid #ddd;border-radius:12px">`; window.print();}
 
 
-function crearFactura(){
-  const p = paciente(Number(facPaciente.value));
-  const numero = facNumero.value.trim() || "0001";
-  const concepto = facConcepto.value.trim() || "TRATAMIENTOS DE FISIOTERAPIA";
-  const cantidad = Number(facCantidad.value || 1);
-  const precio = Number(facPrecio.value || 0);
-  const total = cantidad * precio;
-  const fecha = new Date().toLocaleDateString("es-ES");
 
+let guardandoFactura=false, facturaVisible=null, revisionFacturas=0;
+function escapeFactura(value){
+ return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function dineroFactura(value){
+ return Number(value||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function fechaFactura(value){
+ const match=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+ return match?match[3]+"/"+match[2]+"/"+match[1]:"Sin fecha registrada";
+}
+function accesoFacturas(escritura=false){
+ const id=clinicaId();
+ if(!(escritura?["admin","recepcion"]:["admin","recepcion","supervisor"]).includes(rolActual()))throw new Error("Tu perfil no permite esta operación de facturación.");
+ return id;
+}
+async function crearFactura(){
+ if(guardandoFactura)return;
+ const epoch=accessEpoch;
+ let confirmada=false;
+ try{
+  const clinica=accesoFacturas(true);
+  const p=paciente(Number(facPaciente.value));
+  const numero=facNumero.value.trim(),concepto=facConcepto.value.trim();
+  const cantidad=Number(facCantidad.value),precio=Number(facPrecio.value);
+  const total=Math.round((cantidad*precio+Number.EPSILON)*100)/100;
+  if(!numero)throw new Error("Introduce el número de factura.");
+  if(!p.id)throw new Error("Selecciona un paciente.");
+  if(!concepto)throw new Error("Introduce el concepto.");
+  if(!facCantidad.value.trim() || !facPrecio.value.trim() || !Number.isFinite(cantidad) || cantidad<=0 || !Number.isFinite(precio) || precio<0 || Math.abs(precio*100-Math.round(precio*100))>0.000001 || !Number.isSafeInteger(Math.round(total*100)))throw new Error("Revisa cantidad y precio: cantidad mayor que cero y precio no negativo con hasta dos decimales.");
+  guardandoFactura=true;
+  facturaVisible=null;facturaPreview.innerHTML="";
+  const previa=await sb.from("facturas").select("id").eq("clinica_id",clinica).eq("numero",numero).limit(1).maybeSingle();
+  if(epoch!==accessEpoch)return;
+  if(previa.error)throw previa.error;
+  if(previa.data)throw new Error("Ese número ya está guardado. Actualiza el listado para consultarlo.");
+  const result=await sb.from("facturas").insert(withClinica({numero,paciente_id:p.id,fecha:localISO(new Date()),concepto,cantidad,precio,total})).select("*").single();
+  if(epoch!==accessEpoch)return;
+  if(result.error)throw result.error;
+  if(!result.data?.id || result.data.clinica_id!==clinica)throw new Error("El servidor no ha confirmado el registro.");
+  confirmada=true;
+  revisionFacturas++;
+  facturas=[result.data,...facturas.filter(f=>f.id!==result.data.id)];
+  if(facNumero.value.trim()===numero)facNumero.value="";
+  renderFacturas();verFactura(result.data.id);
+  alert("Factura guardada.");
+ }catch(e){
+  if(epoch===accessEpoch)alert(confirmada?"Factura guardada, pero no se pudo mostrar. Actualiza el listado.":"No se pudo confirmar la factura: "+(e.message||e)+". El formulario se conserva. Actualiza el listado antes de reintentar.");
+ }finally{guardandoFactura=false}
+}
+async function cargarFacturas(){
+ const epoch=accessEpoch,revision=++revisionFacturas;
+ try{
+  const clinica=accesoFacturas();
+  const result=await sb.from("facturas").select("*").eq("clinica_id",clinica).order("id",{ascending:false});
+  if(epoch!==accessEpoch || revision!==revisionFacturas)return;
+  if(result.error)throw result.error;
+  facturas=result.data||[];
+  renderFacturas();
+ }catch(e){if(epoch===accessEpoch)alert("No se pudo cargar el listado: "+(e.message||e))}
+}
+function renderFacturas(){
+ const list=document.getElementById("facturasList");if(!list)return;
+ if(!["admin","recepcion","supervisor"].includes(rolActual())){list.innerHTML="";return}
+ const rows=facturas.filter(f=>f.clinica_id===clinicaActiva?.id);
+ list.innerHTML=rows.length?rows.map(f=>`<div class="item"><b>Factura ${escapeFactura(f.numero||"Sin número")}</b><div>${escapeFactura(fechaFactura(f.fecha))} · ${escapeFactura(paciente(f.paciente_id).nombre||"Paciente no disponible")} · ${dineroFactura(f.total)} €</div><p>${escapeFactura(f.concepto)}</p><button class="btn light" onclick="verFactura('${escapeFactura(String(f.id))}')">Ver / imprimir</button></div>`).join(""):"<p>No hay facturas guardadas.</p>";
+}
+function verFactura(id){
+ try{
+  const clinica=accesoFacturas();
+  const f=facturas.find(row=>String(row.id)===String(id) && row.clinica_id===clinica);
+  if(!f)throw new Error("La factura no está en el listado. Actualízalo.");
+  const p=paciente(f.paciente_id);
+  const {numero,concepto,cantidad,precio,total}=f;
+  const fecha=fechaFactura(f.fecha);
   const html = `
   <div id="facturaAMR" class="facturaAMR">
     <div class="facturaHeader">
       <div>
-        <img src="${window.AMR_LOGO || ""}" class="facturaLogo">
+        <img src="${escapeFactura(window.AMR_LOGO || "")}" class="facturaLogo">
       </div>
       <div class="facturaEmpresa">
         <b>Antonio Javier Martí Romero</b><br>
@@ -510,12 +578,12 @@ function crearFactura(){
 
     <div class="facturaDatos">
       <div>
-        <b>${p.nombre || "Paciente"}</b><br>
-        NIF: ${p.nif || ""}<br>
-        ${p.direccion || ""}
+        <b>${escapeFactura(p.nombre || "Paciente")}</b><br>
+        NIF: ${escapeFactura(p.nif || "")}<br>
+        ${escapeFactura(p.direccion || "")}
       </div>
       <div class="facturaNumero">
-        <h1>FACTURA Nº ${numero}</h1>
+        <h1>FACTURA Nº ${escapeFactura(numero)}</h1>
         <p>${fecha}</p>
       </div>
     </div>
@@ -531,22 +599,22 @@ function crearFactura(){
       </thead>
       <tbody>
         <tr>
-          <td>${concepto}</td>
-          <td>${cantidad}</td>
-          <td>${precio}€</td>
-          <td><b>${total}€</b></td>
+          <td>${escapeFactura(concepto)}</td>
+          <td>${escapeFactura(cantidad)}</td>
+          <td>${dineroFactura(precio)}€</td>
+          <td><b>${dineroFactura(total)}€</b></td>
         </tr>
       </tbody>
     </table>
 
     <div class="facturaTotales">
-      <div><span>Subtotal:</span><b>${total} €</b></div>
+      <div><span>Subtotal:</span><b>${dineroFactura(total)} €</b></div>
       <div><span>IRPF (0%):</span><b>0 €</b></div>
-      <div class="facturaTotalFinal"><span>Total a pagar:</span><b>${total} €</b></div>
+      <div class="facturaTotalFinal"><span>Total a pagar:</span><b>${dineroFactura(total)} €</b></div>
     </div>
 
     <div class="facturaFooter">
-      <img src="${window.AMR_LOGO || ""}">
+      <img src="${escapeFactura(window.AMR_LOGO || "")}">
       <div>AMR<br><span>Clínicas de Fisioterapia</span></div>
     </div>
   </div>
@@ -557,60 +625,31 @@ function crearFactura(){
   </div>
   `;
 
-  facturaPreview.innerHTML = html;
-  registrarLog("facturar","facturas",numero,`Factura ${numero} emitida a ${p.nombre||"paciente"} por ${total}€`);
 
-  try{
-    sb.from("facturas").insert(withClinica({
-      numero,
-      paciente_id:p.id || null,
-      fecha:localISO(new Date()),
-      concepto,
-      cantidad,
-      precio,
-      total
-    }));
-  }catch(e){}
+  facturaVisible={id:f.id,numero:f.numero,html:html.slice(0,html.indexOf('<div class="row facturaActions">'))};
+  facturaPreview.innerHTML=html;
+ }catch(e){alert(e.message||e)}
 }
-
+function documentoFactura(imprimir=false){
+ if(!facturaVisible){alert("Selecciona una factura guardada.");return null}
+ return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Factura ${escapeFactura(facturaVisible.numero)}</title><style>${estilosFactura}</style></head><body>${facturaVisible.html}${imprimir?'<script>window.onload=function(){window.print();}</script>':""}</body></html>`;
+}
 function imprimirFacturaAMR(){
-  const factura = document.getElementById("facturaAMR");
-  if(!factura) return alert("Primero crea la factura.");
-  const ventana = window.open("", "_blank");
-  ventana.document.write(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Factura AMR</title>
-      <style>${document.querySelector("style")?.innerHTML || ""}</style>
-      <link rel="stylesheet" href="styles.css">
-    </head>
-    <body style="background:white;padding:20px">
-      ${factura.outerHTML}
-      <script>window.onload=function(){window.print();}</script>
-    </body>
-    </html>
-  `);
-  ventana.document.close();
+ const html=documentoFactura(true);if(!html)return;
+ const ventana=window.open("","_blank");
+ if(!ventana)return alert("Permite las ventanas emergentes para imprimir.");
+ ventana.document.write(html);ventana.document.close();
 }
-
 function descargarFacturaAMR(){
-  const factura = document.getElementById("facturaAMR");
-  if(!factura) return alert("Primero crea la factura.");
-  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Factura AMR</title><link rel="stylesheet" href="styles.css"></head><body style="background:white;padding:20px">${factura.outerHTML}</body></html>`;
-  const blob = new Blob([html], {type:"text/html;charset=utf-8"});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "Factura_AMR_" + (facNumero.value.trim() || "0001") + ".html";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+ const html=documentoFactura();if(!html)return;
+ const blob=new Blob([html],{type:"text/html;charset=utf-8"}),url=URL.createObjectURL(blob);
+ const a=document.createElement("a");a.href=url;
+ a.download="Factura_AMR_"+String(facturaVisible.numero||facturaVisible.id).replace(/[^a-zA-Z0-9._-]/g,"_")+".html";
+ document.body.appendChild(a);a.click();a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
-function renderFacturas(){}
 
-
+const estilosFactura="body{margin:0;background:white}*{box-sizing:border-box}.facturaAMR{\n  background:white!important;\n  color:#1f2937!important;\n  max-width:900px;\n  margin:22px auto;\n  padding:38px 44px;\n  border-radius:22px;\n  box-shadow:0 18px 45px rgba(15,23,42,.08);\n  font-family:Arial,Helvetica,sans-serif;\n}\n.facturaHeader{\n  display:flex;\n  justify-content:space-between;\n  gap:24px;\n  align-items:flex-start;\n}\n.facturaLogo{\n  width:165px;\n  height:165px;\n  object-fit:contain;\n}\n.facturaEmpresa{\n  text-align:right;\n  color:#4b5563;\n  font-size:14px;\n  line-height:1.55;\n}\n.facturaEmpresa b{\n  color:#111827;\n  font-size:16px;\n}\n.facturaBar{\n  height:11px;\n  border-radius:999px;\n  margin:26px 0 30px;\n  background:linear-gradient(90deg,#0f8f94 0 36%,#9ca3af 36% 70%,#111827 70%);\n}\n.facturaDatos{\n  display:flex;\n  justify-content:space-between;\n  gap:24px;\n  align-items:flex-start;\n  font-size:16px;\n  line-height:1.5;\n}\n.facturaNumero{\n  text-align:right;\n}\n.facturaNumero h1{\n  margin:0;\n  font-size:30px;\n  color:#0f8f94;\n}\n.facturaNumero p{\n  margin:6px 0 0;\n  color:#4b5563;\n}\n.facturaTabla{\n  width:100%;\n  border-collapse:collapse;\n  margin-top:34px;\n  font-size:15px;\n}\n.facturaTabla th{\n  background:#0f8f94;\n  color:white;\n  padding:12px;\n  text-align:center;\n}\n.facturaTabla th:first-child{\n  text-align:left;\n}\n.facturaTabla td{\n  padding:20px 12px;\n  border-bottom:1px solid #e5e7eb;\n  text-align:center;\n}\n.facturaTabla td:first-child{\n  text-align:left;\n}\n.facturaTotales{\n  width:320px;\n  margin:42px 0 0 auto;\n  font-size:17px;\n  line-height:1.9;\n}\n.facturaTotales div{\n  display:flex;\n  justify-content:space-between;\n}\n.facturaTotalFinal{\n  border-top:2px solid #0f8f94;\n  margin-top:8px;\n  padding-top:8px;\n  font-size:20px;\n}\n.facturaFooter{\n  margin-top:54px;\n  display:flex;\n  align-items:center;\n  justify-content:center;\n  gap:12px;\n  color:#0f8f94;\n  font-weight:900;\n}\n.facturaFooter img{\n  width:70px;\n  height:70px;\n  object-fit:contain;\n}\n.facturaFooter span{\n  font-size:13px;\n  letter-spacing:2px;\n  font-weight:600;\n}\n.facturaActions{\n  justify-content:center;\n  margin-bottom:20px;\n}\n@media print{\n  body *{visibility:hidden!important}\n  .facturaAMR,.facturaAMR *{visibility:visible!important}\n  .facturaAMR{\n    position:absolute;\n    left:0;\n    top:0;\n    width:100%;\n    box-shadow:none!important;\n    border-radius:0!important;\n  }\n}\n\n\n";
 
 /* ===== WhatsApp PRO ===== */
 function telefonoLimpio(t){

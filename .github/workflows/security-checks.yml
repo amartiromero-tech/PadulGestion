@@ -11,6 +11,6 @@ jobs:
         with:
           node-version: '24'
       - run: node --check app.js
-      - run: node --test tests/access.cjs tests/citas.test.cjs tests/history.test.cjs
+      - run: node --test tests/access.cjs tests/citas.test.cjs tests/history.test.cjs tests/billing.test.cjs
       - run: node tests/patients.cjs
       - run: node tests/service-worker.cjs
