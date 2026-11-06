@@ -476,7 +476,42 @@ function setupFirma(){
 }
 function clearFirma(){const c=firmaCanvas;c.getContext("2d").clearRect(0,0,c.width,c.height)}
 function firmaData(){return firmaCanvas.toDataURL("image/png")}
-async function saveLegal(){const pid=Number(legalPaciente.value); if(!pid)return alert("Selecciona paciente"); if(!legalAcepta.checked)return alert("Marca aceptación"); const tipo=legalTipo.value; const firma=firmaData(); const notas=legalNotas.value; const r= tipo==="sesion" ? await sb.from("firmas_sesiones").insert(withClinica({paciente_id:pid,fecha:localISO(new Date()),hora:"",motivo:"Firma de sesión",importe:0,notas,firma,confirmado:true,created_at:new Date().toISOString()})) : await sb.from("consentimientos").insert(withClinica({paciente_id:pid,tipo,profesional:"Antonio Javier Martí Romero",centro:clinicaActiva?.nombre||"Clínica",notas,firma,aceptado:true,fecha:new Date().toISOString()})); if(r.error)return alert(r.error.message); await registrarLog(tipo==="sesion"?"firmar":"crear",tipo==="sesion"?"firmas_sesiones":"consentimientos",pid,`${legalDocs[tipo]?.[0]||tipo} firmado por ${paciente(pid).nombre||"paciente"}`); alert("Documento guardado"); clearFirma(); legalAcepta.checked=false; await loadCloud();}
+let guardandoLegal=false;
+async function saveLegal(){
+ if(guardandoLegal)return;
+ const epoch=accessEpoch;
+ let confirmado=false;
+ try{
+  const clinica=clinicaId();
+  if(!["admin","fisio"].includes(rolActual()))throw new Error("Tu perfil no permite guardar documentos firmados.");
+  const pid=Number(legalPaciente.value),tipo=legalTipo.value;
+  if(!pid || !paciente(pid).id)throw new Error("Selecciona paciente.");
+  if(!Object.prototype.hasOwnProperty.call(legalDocs,tipo))throw new Error("Selecciona un tipo de documento válido.");
+  if(!legalAcepta.checked)throw new Error("Marca aceptación.");
+  const firma=firmaData(),notas=legalNotas.value;
+  const tabla=tipo==="sesion"?"firmas_sesiones":"consentimientos";
+  const data=tipo==="sesion"
+   ?{paciente_id:pid,fecha:localISO(new Date()),hora:"",motivo:"Firma de sesión",importe:0,notas,firma,confirmado:true,created_at:new Date().toISOString()}
+   :{paciente_id:pid,tipo,profesional:"Antonio Javier Martí Romero",centro:clinicaActiva?.nombre||"Clínica",notas,firma,aceptado:true,fecha:new Date().toISOString()};
+  guardandoLegal=true;
+  const result=await sb.from(tabla).insert(withClinica(data)).select("*").single();
+  if(epoch!==accessEpoch)return;
+  if(result.error)throw result.error;
+  if(!result.data?.id || result.data.clinica_id!==clinica || result.data.paciente_id!==pid)throw new Error("El servidor no ha confirmado el documento.");
+  confirmado=true;
+  if(tipo==="sesion")firmasSesiones=[result.data,...firmasSesiones.filter(d=>d.id!==result.data.id)];
+  else consentimientos=[result.data,...consentimientos.filter(d=>d.id!==result.data.id)];
+  // A pending response must never erase a changed signature or another document's draft.
+  if(Number(legalPaciente.value)===pid && legalTipo.value===tipo && legalNotas.value===notas && legalAcepta.checked && firmaData()===firma){
+   clearFirma();legalAcepta.checked=false;
+  }
+  renderLegalHistory();
+  alert("Documento guardado.");
+ }catch(e){
+  if(epoch===accessEpoch)alert(confirmado?"Documento guardado, pero no se pudo actualizar la pantalla. Recarga para consultarlo.":"No se pudo confirmar el documento: "+(e.message||e)+" La firma y las observaciones se conservan. Consulta el historial antes de reintentar.");
+ }finally{guardandoLegal=false}
+}
+
 function renderLegalHistory(){const pid=Number(legalPaciente.value||0); const docs=[...consentimientos.filter(x=>x.paciente_id==pid),...firmasSesiones.filter(x=>x.paciente_id==pid).map(x=>({...x,tipo:"sesion"}))]; legalHistory.innerHTML=docs.map(d=>`<div class="item"><b>${legalDocs[d.tipo]?.[0]||d.tipo}</b><p>${new Date(d.created_at||d.fecha).toLocaleString("es-ES")}</p></div>`).join("")||"<p>Sin documentos.</p>"}
 function printLegal(){const p=paciente(Number(legalPaciente.value)); const d=legalDocs[legalTipo.value]; printArea.innerHTML=`<h1>AMR Clínicas Fisioterapia</h1><h2>${d[0]}</h2><p><b>Paciente:</b> ${p.nombre||""}</p><p>${d[1]}</p><p><b>Observaciones:</b> ${legalNotas.value}</p><img src="${firmaData()}" style="width:360px;border:1px solid #ddd;border-radius:12px">`; window.print();}
 
