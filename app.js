@@ -185,10 +185,13 @@ function renderCalendar(){
 function renderToday(){const today=selectedDate; const arr=citas.filter(c=>c.fecha===today).sort((a,b)=>String(a.hora).localeCompare(String(b.hora))); todayList.innerHTML=arr.map(c=>citaItem(c)).join("")||"<p>No hay citas.</p>"}
 function citaItem(c){const p=paciente(c.paciente_id);return `<div class="item"><b>${c.hora} · ${p.nombre||"Paciente"}</b><p>${c.fecha} · ${c.motivo||""} · ${eur(c.precio)} · ${c.estado||""}</p><div class="row"><button class="btn light" onclick="editCita(${c.id})">Editar</button><button class="btn ghost" onclick="deleteCita(${c.id})">Borrar</button></div></div>`}
 function renderCitas(){allCitas.innerHTML=[...citas].sort((a,b)=>(b.fecha+b.hora).localeCompare(a.fecha+a.hora)).slice(0,80).map(citaItem).join("")||"<p>Sin citas.</p>"}
-let guardandoCita=false;
+let guardandoCita=false, citaEditId=null;
 function newCita(fecha=localISO(new Date()), hora="09:00"){
  if(guardandoCita)return;
+ citaEditId=null;
  citaId.value="";
+ const titulo=document.getElementById?.("citaFormTitulo");
+ if(titulo)titulo.textContent="Nueva cita";
  citaFecha.value=fecha;citaHora.value=hora;citaPaciente.value=selectedPacienteId||"";
  citaMotivo.value="";citaPrecio.value=35;citaEstado.value="Confirmada";
  showSection("agenda");
@@ -196,13 +199,16 @@ function newCita(fecha=localISO(new Date()), hora="09:00"){
 function editCita(id){
  if(guardandoCita)return;
  const c=citas.find(x=>x.id==id);if(!c)return;
+ citaEditId=c.id;
+ const titulo=document.getElementById?.("citaFormTitulo");
+ if(titulo)titulo.textContent="Editando cita: "+c.fecha+" "+c.hora;
  showSection("agenda");citaId.value=c.id;citaPaciente.value=c.paciente_id;
  citaFecha.value=c.fecha;citaHora.value=c.hora;citaMotivo.value=c.motivo||"";
  citaPrecio.value=c.precio??35;citaEstado.value=c.estado||"Confirmada";
 }
 async function saveCita(){
  if(guardandoCita)return;
- const id=citaId.value;
+ const id=citaEditId;
  const data={paciente_id:Number(citaPaciente.value),fecha:citaFecha.value,hora:citaHora.value,motivo:citaMotivo.value,precio:Number(citaPrecio.value||0),estado:citaEstado.value};
  if(!data.paciente_id)return alert("Selecciona paciente");
  if(!data.fecha||!data.hora)return alert("Indica fecha y hora");
@@ -211,7 +217,10 @@ async function saveCita(){
  try{
    const query=id?sb.from("citas").update(data).eq("id",Number(id)):sb.from("citas").insert(withClinica(data));
    const r=await query.select("id").single();
-   if(r.error)throw r.error;
+   if(r.error){
+     if(r.error.code==="PGRST116")throw new Error(id?"No se pudo actualizar la cita: no se ha confirmado una única fila. Recarga la agenda y vuelve a abrir la cita. Para crear otra, pulsa + Nueva cita.":"No se pudo confirmar el alta. Recarga la agenda antes de intentarlo otra vez.");
+     throw r.error;
+   }
    if(!r.data?.id)throw new Error("No se ha confirmado la cita guardada");
    saved=r.data;
  }catch(e){
