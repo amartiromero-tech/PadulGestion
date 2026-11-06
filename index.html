@@ -195,16 +195,19 @@
 
       <section id="facturas" class="section">
         <div class="card">
-          <h2>Factura</h2>
+          <h2>Nueva factura</h2>
           <div class="form invoiceForm">
             <label>Nº factura</label><input id="facNumero" placeholder="0001">
             <label>Paciente</label><select id="facPaciente"></select>
             <label>Concepto</label><input id="facConcepto" value="TRATAMIENTOS DE FISIOTERAPIA">
-            <label>Cantidad</label><input id="facCantidad" type="number" value="1">
-            <label>Precio</label><input id="facPrecio" type="number" value="35">
+            <label>Cantidad</label><input id="facCantidad" type="number" min="0.01" step="any" value="1">
+            <label>Precio</label><input id="facPrecio" type="number" min="0" step="0.01" value="35">
             <button class="btn" onclick="crearFactura()">Crear factura</button>
           </div>
           <div id="facturaPreview"></div>
+<h2>Facturas guardadas</h2>
+<button class="btn light" onclick="cargarFacturas()">Actualizar listado</button>
+<div id="facturasList" class="list"></div>
         </div>
       </section>
 
